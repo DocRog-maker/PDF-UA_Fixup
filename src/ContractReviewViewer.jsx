@@ -12,6 +12,7 @@ function ContractReviewViewer({ contractDocumentUrl, onWebViewerInitialized }) {
         licenseKey,
         initialDoc: contractDocumentUrl,
         enableFilePicker: true,
+        fullAPI: true,
       },
       viewerContainerRef.current
     ).then((instance) => {
@@ -19,7 +20,7 @@ function ContractReviewViewer({ contractDocumentUrl, onWebViewerInitialized }) {
     });
   }, [contractDocumentUrl, licenseKey, onWebViewerInitialized]);
 
-  return <div ref={viewerContainerRef} style={{ height: '90vh' }} />;
+  return <div ref={viewerContainerRef} style={{ height: '80vh' }} />;
 }
 
 export default ContractReviewViewer;

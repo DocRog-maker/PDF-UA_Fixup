@@ -1,4 +1,4 @@
-import { StrictMode, useState } from 'react';
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import ContractReviewViewer from './ContractReviewViewer.jsx';
@@ -8,10 +8,12 @@ function App() {
   const [webViewerInstance, setWebViewerInstance] = useState(null);
 
   return (
-    <>
-      <ContractReviewViewer onWebViewerInitialized={setWebViewerInstance} />
+    <div className="contract-review-layout">
+      <div className="contract-review-viewer">
+        <ContractReviewViewer onWebViewerInitialized={setWebViewerInstance} />
+      </div>
       <PageNavControls instance={webViewerInstance} />
-    </>
+    </div>
   );
 }
 

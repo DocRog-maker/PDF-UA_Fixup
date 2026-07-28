@@ -54,6 +54,11 @@ body {
   margin: 0;
 }
 
+button,
+select {
+  font: inherit;
+}
+
 #root {
   width: 1126px;
   max-width: 100%;
@@ -64,6 +69,110 @@ body {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+}
+
+.contract-review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  text-align: left;
+}
+
+.contract-review-viewer {
+  min-width: 0;
+}
+
+.contract-review-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: sticky;
+  top: 12px;
+}
+
+.contract-review-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.contract-review-controls button,
+.tag-tools button {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.contract-review-controls button:disabled,
+.tag-tools button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.tag-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tag-tools-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag-tools-row select {
+  flex: 1 1 320px;
+  min-width: 220px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  padding: 8px 10px;
+}
+
+.tag-list-container {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+@media (max-width: 1024px) {
+  .contract-review-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .contract-review-nav {
+    position: static;
+  }
+}
+
+.tag-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.tag-list li {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tag-list li:first-child {
+  border-top: none;
 }
 
 h1,
