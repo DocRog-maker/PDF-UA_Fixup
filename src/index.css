@@ -90,12 +90,31 @@ select {
   gap: 10px;
   position: sticky;
   top: 12px;
+  background: var(--social-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
 }
 
 .contract-review-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.manual-scroll-row {
+  display: flex;
+  gap: 8px;
+}
+
+.manual-scroll-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  padding: 8px 10px;
 }
 
 .contract-review-controls button,

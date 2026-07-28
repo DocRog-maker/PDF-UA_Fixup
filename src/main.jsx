@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
-import ContractReviewViewer from './ContractReviewViewer.jsx';
+import DocumentViewer from './DocumentViewer.jsx';
 import PageNavControls from './PageNavControls.jsx';
 
 function App() {
@@ -10,7 +10,7 @@ function App() {
   return (
     <div className="contract-review-layout">
       <div className="contract-review-viewer">
-        <ContractReviewViewer onWebViewerInitialized={setWebViewerInstance} />
+        <DocumentViewer onWebViewerInitialized={setWebViewerInstance} />
       </div>
       <PageNavControls instance={webViewerInstance} />
     </div>

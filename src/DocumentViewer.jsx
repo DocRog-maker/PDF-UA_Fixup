@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import WebViewer from '@pdftron/webviewer';
 
-function ContractReviewViewer({ contractDocumentUrl, onWebViewerInitialized }) {
+function DocumentViewer({ contractDocumentUrl, onWebViewerInitialized }) {
   const viewerContainerRef = useRef(null);
   const licenseKey = import.meta.env.APRYSE_LICENSE_KEY;
 
@@ -23,4 +23,4 @@ function ContractReviewViewer({ contractDocumentUrl, onWebViewerInitialized }) {
   return <div ref={viewerContainerRef} style={{ height: '80vh' }} />;
 }
 
-export default ContractReviewViewer;
+export default DocumentViewer;

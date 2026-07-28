@@ -7,15 +7,39 @@ function PageNavControls({ instance }) {
     const activeHighlightAnnotationRef = useRef(null);
     const programmaticScrollInProgressRef = useRef(false);
     const programmaticScrollTimeoutRef = useRef(null);
+    const topAlignLockRef = useRef(null);
+    const topAlignLockTimeoutRef = useRef(null);
+    const topAlignLockIntervalRef = useRef(null);
+    const debugSequenceRef = useRef(0);
     const [tags, setTags] = useState([]);
     const [imageTagsWithAltText, setImageTagsWithAltText] = useState([]);
     const [selectedImageTagId, setSelectedImageTagId] = useState('');
     const [editableAltText, setEditableAltText] = useState('');
+    const [manualScrollInput, setManualScrollInput] = useState('');
     const [isSavingAltText, setIsSavingAltText] = useState(false);
     const [altTextSaveStatus, setAltTextSaveStatus] = useState('');
     const [isLoadingTags, setIsLoadingTags] = useState(false);
     const [tagError, setTagError] = useState('');
     const licenseKey = import.meta.env.APRYSE_LICENSE_KEY || '';
+    const debugScroll = true;
+    const debugVerbosity = 'verbose';
+    const enableImageHighlight = false;
+
+    const logDebug = useCallback((eventName, details = {}) => {
+        if (!debugScroll) {
+            return;
+        }
+
+        debugSequenceRef.current += 1;
+        const now = new Date().toISOString();
+        const perfNow = Math.round(window.performance.now());
+        const payload = {
+            verbosity: debugVerbosity,
+            tMs: perfNow,
+            ...details,
+        };
+        console.log(`[ImageNavDebug #${debugSequenceRef.current}] ${now} ${eventName}`, payload);
+    }, [debugScroll, debugVerbosity]);
 
     const loadFile = (file) => {
         if (!file || !instance?.UI) {
@@ -25,31 +49,6 @@ function PageNavControls({ instance }) {
         instance.UI.loadDocument(file, { filename: file.name }).catch((error) => {
             console.error('Failed to load selected file in WebViewer', error);
         });
-    };
-
-    const goToNextPage = () => {
-        if (!documentViewer) {
-            return;
-        }
-
-        const currentPage = documentViewer.getCurrentPage();
-        const totalPages = documentViewer.getPageCount();
-
-        if (currentPage < totalPages) {
-            documentViewer.setCurrentPage(currentPage + 1);
-        }
-    };
-
-    const goToPreviousPage = () => {
-        if (!documentViewer) {
-            return;
-        }
-
-        const currentPage = documentViewer.getCurrentPage();
-
-        if (currentPage > 1) {
-            documentViewer.setCurrentPage(currentPage - 1);
-        }
     };
 
     const openFilePicker = () => {
@@ -84,6 +83,9 @@ function PageNavControls({ instance }) {
     };
 
     const clearImageHighlight = useCallback(() => {
+        logDebug('clearImageHighlight:begin', {
+            hasHighlight: Boolean(activeHighlightAnnotationRef.current),
+        });
         const annotationManager = instance?.Core?.annotationManager;
         const highlightAnnotation = activeHighlightAnnotationRef.current;
 
@@ -96,9 +98,120 @@ function PageNavControls({ instance }) {
             source: 'image-tag-highlight',
         });
         activeHighlightAnnotationRef.current = null;
-    }, [instance]);
+        logDebug('clearImageHighlight:end');
+    }, [instance, logDebug]);
+
+    const clearTopAlignLock = useCallback(() => {
+        topAlignLockRef.current = null;
+        if (topAlignLockTimeoutRef.current) {
+            window.clearTimeout(topAlignLockTimeoutRef.current);
+            topAlignLockTimeoutRef.current = null;
+        }
+        if (topAlignLockIntervalRef.current) {
+            window.clearInterval(topAlignLockIntervalRef.current);
+            topAlignLockIntervalRef.current = null;
+        }
+        logDebug('clearTopAlignLock');
+    }, [logDebug]);
+
+    const getTopAlignedPdfY = useCallback((imageTag) => {
+        if (!documentViewer || !imageTag?.rect || !imageTag?.pageNumber) {
+            return null;
+        }
+
+        const pageHeight = documentViewer.getPageHeight(imageTag.pageNumber);
+        const maxY = Math.max(imageTag.rect.y1, imageTag.rect.y2);
+        return pageHeight - maxY;
+    }, [documentViewer]);
+
+    const setTopAlignLock = useCallback((imageTag, durationMs = 5000) => {
+        if (!imageTag?.rect || !imageTag?.pageNumber) {
+            return;
+        }
+
+        const topAlignedPdfY = getTopAlignedPdfY(imageTag);
+        if (topAlignedPdfY === null) {
+            return;
+        }
+
+        topAlignLockRef.current = {
+            pageNumber: imageTag.pageNumber,
+            rect: {
+                x1: imageTag.rect.x1,
+                y1: imageTag.rect.y1,
+                x2: imageTag.rect.x2,
+                y2: imageTag.rect.y2,
+            },
+            id: imageTag.id,
+            topAlignedPdfY,
+        };
+        if (topAlignLockTimeoutRef.current) {
+            window.clearTimeout(topAlignLockTimeoutRef.current);
+        }
+        if (topAlignLockIntervalRef.current) {
+            window.clearInterval(topAlignLockIntervalRef.current);
+        }
+
+        const runLockCorrection = () => {
+            if (!documentViewer || !topAlignLockRef.current) {
+                return;
+            }
+
+            const scrollViewElement = documentViewer.getScrollViewElement();
+            const displayMode = documentViewer.getDisplayModeManager().getDisplayMode();
+            if (!scrollViewElement || !displayMode) {
+                return;
+            }
+
+            const lock = topAlignLockRef.current;
+            const lockTargetPoint = displayMode.pageToWindow(
+                {
+                    x: (lock.rect.x1 + lock.rect.x2) / 2,
+                    y: lock.topAlignedPdfY,
+                },
+                lock.pageNumber
+            );
+            const maxTop = Math.max(0, scrollViewElement.scrollHeight - scrollViewElement.clientHeight);
+            const desiredTop = Math.min(maxTop, Math.max(0, lockTargetPoint.y - 24));
+            const verticalDelta = Math.abs(scrollViewElement.scrollTop - desiredTop);
+
+            if (verticalDelta > 2) {
+                logDebug('topAlignLock:intervalCorrection', {
+                    lockTagId: lock.id,
+                    currentTop: scrollViewElement.scrollTop,
+                    desiredTop,
+                    verticalDelta,
+                });
+                scrollViewElement.scrollTo({
+                    top: desiredTop,
+                    behavior: 'auto',
+                });
+            }
+        };
+
+        topAlignLockIntervalRef.current = window.setInterval(runLockCorrection, 90);
+        topAlignLockTimeoutRef.current = window.setTimeout(() => {
+            if (topAlignLockIntervalRef.current) {
+                window.clearInterval(topAlignLockIntervalRef.current);
+                topAlignLockIntervalRef.current = null;
+            }
+            topAlignLockRef.current = null;
+            topAlignLockTimeoutRef.current = null;
+            logDebug('topAlignLockExpired');
+        }, durationMs);
+        logDebug('setTopAlignLock', {
+            tagId: imageTag.id,
+            pageNumber: imageTag.pageNumber,
+            topAlignedPdfY,
+            durationMs,
+        });
+    }, [documentViewer, getTopAlignedPdfY, logDebug]);
 
     const scheduleProgrammaticScrollReset = useCallback((delayMs) => {
+        logDebug('scheduleProgrammaticScrollReset', {
+            delayMs,
+            hadExistingTimer: Boolean(programmaticScrollTimeoutRef.current),
+        });
         if (programmaticScrollTimeoutRef.current) {
             window.clearTimeout(programmaticScrollTimeoutRef.current);
         }
@@ -106,24 +219,79 @@ function PageNavControls({ instance }) {
         programmaticScrollTimeoutRef.current = window.setTimeout(() => {
             programmaticScrollInProgressRef.current = false;
             programmaticScrollTimeoutRef.current = null;
+            logDebug('programmaticScrollResetFired');
         }, delayMs);
-    }, []);
+    }, [logDebug]);
 
     const beginProgrammaticScroll = useCallback((maxDurationMs = 2500) => {
         programmaticScrollInProgressRef.current = true;
+        logDebug('beginProgrammaticScroll', { maxDurationMs });
         scheduleProgrammaticScrollReset(maxDurationMs);
-    }, [scheduleProgrammaticScrollReset]);
+    }, [logDebug, scheduleProgrammaticScrollReset]);
 
     const markProgrammaticScrollSettling = useCallback(() => {
         if (!programmaticScrollInProgressRef.current) {
+            logDebug('markProgrammaticScrollSettling:ignored');
             return;
         }
 
+        logDebug('markProgrammaticScrollSettling:apply');
         scheduleProgrammaticScrollReset(220);
-    }, [scheduleProgrammaticScrollReset]);
+    }, [logDebug, scheduleProgrammaticScrollReset]);
+
+    const enforceTopAlignLock = useCallback((source) => {
+        if (!documentViewer || !topAlignLockRef.current) {
+            return false;
+        }
+
+        const scrollViewElement = documentViewer.getScrollViewElement();
+        const displayMode = documentViewer.getDisplayModeManager().getDisplayMode();
+        if (!scrollViewElement || !displayMode) {
+            return true;
+        }
+
+        const lock = topAlignLockRef.current;
+        const lockTargetPoint = displayMode.pageToWindow(
+            {
+                x: (lock.rect.x1 + lock.rect.x2) / 2,
+                y: lock.topAlignedPdfY,
+            },
+            lock.pageNumber
+        );
+        const maxTop = Math.max(0, scrollViewElement.scrollHeight - scrollViewElement.clientHeight);
+        const desiredTop = Math.min(maxTop, Math.max(0, lockTargetPoint.y - 24));
+        const verticalDelta = Math.abs(scrollViewElement.scrollTop - desiredTop);
+
+        if (verticalDelta > 2) {
+            logDebug('topAlignLock:enforceCorrection', {
+                source,
+                currentTop: scrollViewElement.scrollTop,
+                desiredTop,
+                verticalDelta,
+                lockTagId: lock.id,
+            });
+            beginProgrammaticScroll(1200);
+            scrollViewElement.scrollTo({
+                top: desiredTop,
+                behavior: 'auto',
+            });
+        }
+
+        return true;
+    }, [beginProgrammaticScroll, documentViewer, logDebug]);
 
     const showImageHighlight = useCallback((imageTag) => {
+        logDebug('showImageHighlight:begin', {
+            tagId: imageTag?.id,
+            pageNumber: imageTag?.pageNumber,
+            hasRect: Boolean(imageTag?.rect),
+        });
         clearImageHighlight();
+
+        if (!enableImageHighlight) {
+            logDebug('showImageHighlight:disabled');
+            return;
+        }
 
         if (!imageTag?.pageNumber || !imageTag?.rect || !instance?.Core || !documentViewer) {
             return;
@@ -164,48 +332,108 @@ function PageNavControls({ instance }) {
         });
         annotationManager.redrawAnnotation(highlightAnnotation);
         activeHighlightAnnotationRef.current = highlightAnnotation;
-    }, [clearImageHighlight, documentViewer, instance]);
+        logDebug('showImageHighlight:end', {
+            tagId: imageTag?.id,
+            pageNumber: imageTag?.pageNumber,
+        });
+    }, [clearImageHighlight, documentViewer, enableImageHighlight, instance, logDebug]);
 
-    const scrollToImageTag = useCallback((imageTag) => {
+    const scrollToImageTag = useCallback(async(imageTag, options = {}) => {
+        const { alignTop = false } = options;
+        const expectedPdfRect = imageTag?.rect
+            ? {
+                x1: imageTag.rect.x1,
+                y1: imageTag.rect.y1,
+                x2: imageTag.rect.x2,
+                y2: imageTag.rect.y2,
+                minX: Math.min(imageTag.rect.x1, imageTag.rect.x2),
+                maxX: Math.max(imageTag.rect.x1, imageTag.rect.x2),
+                minY: Math.min(imageTag.rect.y1, imageTag.rect.y2),
+                maxY: Math.max(imageTag.rect.y1, imageTag.rect.y2),
+            }
+            : null;
+        const expectedPdfAnchor = expectedPdfRect
+            ? {
+                x: (expectedPdfRect.x1 + expectedPdfRect.x2) / 2,
+                yTop: expectedPdfRect.maxY,
+                yCenter: (expectedPdfRect.y1 + expectedPdfRect.y2) / 2,
+            }
+            : null;
+        logDebug('scrollToImageTag:begin', {
+            tagId: imageTag?.id,
+            pageNumber: imageTag?.pageNumber,
+            alignTop,
+            hasRect: Boolean(imageTag?.rect),
+            caller: alignTop ? 'next-button' : 'dropdown-select',
+            expectedPdfRect,
+            expectedPdfAnchor,
+        });
+
         if (!documentViewer || !imageTag?.pageNumber) {
+            logDebug('scrollToImageTag:abort-no-documentViewer-or-page');
             return;
         }
-
         beginProgrammaticScroll();
         showImageHighlight(imageTag);
-        documentViewer.setCurrentPage(imageTag.pageNumber, true);
+        documentViewer.setCurrentPage(imageTag.pageNumber, !alignTop);
+        logDebug('scrollToImageTag:setCurrentPage', {
+            pageNumber: imageTag.pageNumber,
+            smooth: !alignTop,
+        });
 
         if (!imageTag.rect) {
+            logDebug('scrollToImageTag:abort-no-rect', {
+                tagId: imageTag?.id,
+            });
             return;
         }
 
-        window.setTimeout(() => {
-            beginProgrammaticScroll();
-            const displayMode = documentViewer.getDisplayModeManager().getDisplayMode();
-            const scrollViewElement = documentViewer.getScrollViewElement();
+        const pageHieght = await documentViewer.getPageHeight(imageTag.pageNumber)
+        console.log(`ph: ${pageHieght}`)
+        const targetTop = pageHieght - Math.max(imageTag.rect.y1, imageTag.rect.y2);
+         console.log(`top: ${targetTop}`)
+        const zoom = documentViewer.getZoomLevel();
+        const finalTop = targetTop*zoom
+        // if (alignTop) {
+             const scrollViewElement = documentViewer.getScrollViewElement();
+             scrollViewElement.scrollTo({
+            top: finalTop,
+            behavior: 'auto',
+        });
+        //     const displayMode = documentViewer.getDisplayModeManager().getDisplayMode();
+        //     if (scrollViewElement && displayMode) {
+        //         const topAlignedPdfY = getTopAlignedPdfY(imageTag);
+        //         if (topAlignedPdfY !== null) {
+        //             const targetPoint = displayMode.pageToWindow(
+        //                 {
+        //                     x: (imageTag.rect.x1 + imageTag.rect.x2) / 2,
+        //                     y: topAlignedPdfY,
+        //                 },
+        //                 imageTag.pageNumber
+        //             );
+        //             const maxTop = Math.max(0, scrollViewElement.scrollHeight - scrollViewElement.clientHeight);
+        //             const desiredTop = Math.min(maxTop, Math.max(0, targetPoint.y - 24));
+        //             beginProgrammaticScroll(2500);
+        //             logDebug('scrollToImageTag:firstPass:scrollTo', {
+        //                 left: scrollViewElement.scrollLeft,
+        //                 top: desiredTop,
+        //                 rawPoint: targetPoint,
+        //                 topAlignedPdfY,
+        //                 expectedPdfRect,
+        //                 expectedPdfAnchor,
+        //             });
+        //             scrollViewElement.scrollTo({
+        //                 top: desiredTop,
+        //                 behavior: 'auto',
+        //             });
+        //         }
+        //     }
+        //     setTopAlignLock(imageTag);
+        // } else {
+        //     clearTopAlignLock();
+        // }
 
-            if (!displayMode || !scrollViewElement || typeof scrollViewElement.scrollTo !== 'function') {
-                return;
-            }
-
-            const targetPoint = displayMode.pageToWindow(
-                {
-                    x: (imageTag.rect.x1 + imageTag.rect.x2) / 2,
-                    y: (imageTag.rect.y1 + imageTag.rect.y2) / 2,
-                },
-                imageTag.pageNumber
-            );
-
-            const targetLeft = Math.max(0, targetPoint.x - scrollViewElement.clientWidth / 2);
-            const targetTop = Math.max(0, targetPoint.y - scrollViewElement.clientHeight / 2);
-
-            scrollViewElement.scrollTo({
-                left: targetLeft,
-                top: targetTop,
-                behavior: 'smooth',
-            });
-        }, 120);
-    }, [beginProgrammaticScroll, documentViewer, showImageHighlight]);
+    }, [beginProgrammaticScroll, clearTopAlignLock, documentViewer, getTopAlignedPdfY, logDebug, setTopAlignLock, showImageHighlight]);
 
     const loadTags = useCallback(async () => {
         if (!instance?.Core || !documentViewer) {
@@ -360,7 +588,7 @@ function PageNavControls({ instance }) {
                         altText,
                     });
 
-                    if ((structType?.toLowerCase() === 'figure' || structType?.toLowerCase() === 'image') && altText.trim().length > 0) {
+                    if (structType?.toLowerCase() === 'figure' || structType?.toLowerCase() === 'image') {
                         const pageData = await findFirstPageForElement(structElement);
                         const rect =
                             pageData && pageData.pageNumber
@@ -450,6 +678,18 @@ function PageNavControls({ instance }) {
         }
 
         const onScroll = () => {
+            const scrollViewElement = documentViewer.getScrollViewElement();
+            logDebug('scrollView:onScroll', {
+                programmaticInProgress: programmaticScrollInProgressRef.current,
+                scrollTop: scrollViewElement?.scrollTop,
+                scrollLeft: scrollViewElement?.scrollLeft,
+                hasTopAlignLock: Boolean(topAlignLockRef.current),
+            });
+
+            if (enforceTopAlignLock('scroll')) {
+                return;
+            }
+
             if (programmaticScrollInProgressRef.current) {
                 markProgrammaticScrollSettling();
                 return;
@@ -463,7 +703,39 @@ function PageNavControls({ instance }) {
         return () => {
             scrollViewElement.removeEventListener('scroll', onScroll);
         };
-    }, [clearImageHighlight, documentViewer, markProgrammaticScrollSettling]);
+    }, [clearImageHighlight, documentViewer, enforceTopAlignLock, markProgrammaticScrollSettling, logDebug]);
+
+    useEffect(() => {
+        if (!documentViewer) {
+            return undefined;
+        }
+
+        const onFinishedRendering = () => {
+            enforceTopAlignLock('finishedRendering');
+        };
+        const onPagesUpdated = () => {
+            enforceTopAlignLock('pagesUpdated');
+        };
+        const onPageComplete = (pageNum) => {
+            if (!topAlignLockRef.current) {
+                return;
+            }
+
+            if (pageNum === topAlignLockRef.current.pageNumber) {
+                enforceTopAlignLock('pageComplete');
+            }
+        };
+
+        documentViewer.addEventListener('finishedRendering', onFinishedRendering);
+        documentViewer.addEventListener('pagesUpdated', onPagesUpdated);
+        documentViewer.addEventListener('pageComplete', onPageComplete);
+
+        return () => {
+            documentViewer.removeEventListener('finishedRendering', onFinishedRendering);
+            documentViewer.removeEventListener('pagesUpdated', onPagesUpdated);
+            documentViewer.removeEventListener('pageComplete', onPageComplete);
+        };
+    }, [documentViewer, enforceTopAlignLock]);
 
     useEffect(() => {
         if (!documentViewer) {
@@ -471,6 +743,9 @@ function PageNavControls({ instance }) {
         }
 
         const onMouseLeftDown = () => {
+            logDebug('documentViewer:mouseLeftDown', {
+                programmaticInProgress: programmaticScrollInProgressRef.current,
+            });
             if (programmaticScrollInProgressRef.current) {
                 return;
             }
@@ -483,7 +758,7 @@ function PageNavControls({ instance }) {
         return () => {
             documentViewer.removeEventListener('mouseLeftDown', onMouseLeftDown);
         };
-    }, [clearImageHighlight, documentViewer]);
+    }, [clearImageHighlight, documentViewer, logDebug]);
 
     useEffect(() => {
         const onGlobalClickCapture = (event) => {
@@ -525,11 +800,16 @@ function PageNavControls({ instance }) {
     useEffect(() => () => {
         programmaticScrollInProgressRef.current = false;
         clearImageHighlight();
+        clearTopAlignLock();
         if (programmaticScrollTimeoutRef.current) {
             window.clearTimeout(programmaticScrollTimeoutRef.current);
             programmaticScrollTimeoutRef.current = null;
         }
-    }, [clearImageHighlight]);
+        if (topAlignLockIntervalRef.current) {
+            window.clearInterval(topAlignLockIntervalRef.current);
+            topAlignLockIntervalRef.current = null;
+        }
+    }, [clearImageHighlight, clearTopAlignLock]);
 
     const selectedImageTag = imageTagsWithAltText.find((tag) => tag.id === selectedImageTagId) || null;
 
@@ -557,7 +837,39 @@ function PageNavControls({ instance }) {
         setSelectedImageTagId(nextTag.id);
         setEditableAltText(nextTag.altText ?? '');
         setAltTextSaveStatus('');
-        scrollToImageTag(nextTag);
+        console.log(`RECT: ${nextTag.rect.y1} ${nextTag.rect.y2}`)
+        scrollToImageTag(nextTag, { alignTop: true });
+    };
+
+    const scrollToManualPosition = () => {
+        if (!documentViewer) {
+            return;
+        }
+
+        const targetTop = Number.parseFloat(manualScrollInput);
+        if (!Number.isFinite(targetTop) || targetTop < 0) {
+            logDebug('manualScroll:invalidInput', { manualScrollInput });
+            return;
+        }
+
+        const scrollViewElement = documentViewer.getScrollViewElement();
+        if (!scrollViewElement || typeof scrollViewElement.scrollTo !== 'function') {
+            logDebug('manualScroll:abort-no-scroll-element');
+            return;
+        }
+
+        clearTopAlignLock();
+        beginProgrammaticScroll(1200);
+        logDebug('manualScroll:scrollTo', {
+            input: manualScrollInput,
+            targetTop,
+            previousTop: scrollViewElement.scrollTop,
+        });
+
+        scrollViewElement.scrollTo({
+            top: targetTop,
+            behavior: 'auto',
+        });
     };
 
     const saveSelectedImageAltText = async () => {
@@ -655,12 +967,6 @@ function PageNavControls({ instance }) {
                     >
                         Open File
                     </button>
-                    <button onClick={goToPreviousPage} disabled={!isReady}>
-                        Previous
-                    </button>
-                    <button onClick={goToNextPage} disabled={!isReady}>
-                        Next
-                    </button>
                     <button onClick={loadTags} disabled={!isReady || isLoadingTags}>
                         {isLoadingTags ? 'Loading Tags...' : 'Refresh Tags'}
                     </button>
@@ -673,20 +979,32 @@ function PageNavControls({ instance }) {
                     />
                 </div>
 
+                <div className="manual-scroll-row">
+                    <input
+                        type="text"
+                        value={manualScrollInput}
+                        onChange={(event) => setManualScrollInput(event.target.value)}
+                        placeholder="Scroll top (px)"
+                    />
+                    <button onClick={scrollToManualPosition} disabled={!isReady}>
+                        Scroll To Position
+                    </button>
+                </div>
+
                 <div className="tag-tools">
-                    <h3>Image tags with Alt-text</h3>
+                    <h3>Image tags</h3>
                     {imageTagsWithAltText.length > 0 ? (
                         <div className="tag-tools-stack">
                             <div className="tag-tools-row">
                                 <select value={selectedImageTagId} onChange={handleImageTagSelected}>
                                     {imageTagsWithAltText.map((tag) => (
                                         <option key={tag.id} value={tag.id}>
-                                            {`Page ${tag.pageNumber ?? '-'} - ${tag.altText}`}
+                                            {`Page ${tag.pageNumber ?? '-'} - ${tag.altText || '(No Alt-text)'}`}
                                         </option>
                                     ))}
                                 </select>
                                 <button onClick={goToNextImageWithAltText}>
-                                    Next Image with Alt-text
+                                    Next Image Tag
                                 </button>
                             </div>
 
@@ -707,7 +1025,7 @@ function PageNavControls({ instance }) {
                             {altTextSaveStatus ? <p>{altTextSaveStatus}</p> : null}
                         </div>
                     ) : (
-                        <p>No Figure tags with Alt-text were found.</p>
+                        <p>No image tags were found.</p>
                     )}
                 </div>
             </aside>
