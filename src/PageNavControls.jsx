@@ -10,6 +10,9 @@ function PageNavControls({ instance }) {
     const [tags, setTags] = useState([]);
     const [imageTagsWithAltText, setImageTagsWithAltText] = useState([]);
     const [selectedImageTagId, setSelectedImageTagId] = useState('');
+    const [editableAltText, setEditableAltText] = useState('');
+    const [isSavingAltText, setIsSavingAltText] = useState(false);
+    const [altTextSaveStatus, setAltTextSaveStatus] = useState('');
     const [isLoadingTags, setIsLoadingTags] = useState(false);
     const [tagError, setTagError] = useState('');
     const licenseKey = import.meta.env.APRYSE_LICENSE_KEY || '';
@@ -209,6 +212,8 @@ function PageNavControls({ instance }) {
             setTags([]);
             setImageTagsWithAltText([]);
             setSelectedImageTagId('');
+            setEditableAltText('');
+            setAltTextSaveStatus('');
             return;
         }
 
@@ -229,7 +234,6 @@ function PageNavControls({ instance }) {
 
                 const allTags = [];
                 const imageTags = [];
-                let generatedId = 0;
                 const elementTypes = instance.Core.PDFNet.Element.Type;
                 const contentItemTypes = instance.Core.PDFNet.ContentItem.Type;
 
@@ -339,7 +343,6 @@ function PageNavControls({ instance }) {
                         return;
                     }
 
-                    generatedId += 1;
                     const structType = await structElement.getType();
                     const hasAlt = await structElement.hasAlt();
                     const altText = hasAlt ? await structElement.getAlt() : '';
@@ -347,7 +350,7 @@ function PageNavControls({ instance }) {
                     const title = hasTitle ? await structElement.getTitle() : '';
                     const structSdfObj = await structElement.getSDFObj();
                     const structObjNum = await structSdfObj.getObjNum();
-                    const tagId = `struct-${structObjNum}-${generatedId}`;
+                    const tagId = `struct-${structObjNum}`;
 
                     allTags.push({
                         id: tagId,
@@ -398,23 +401,25 @@ function PageNavControls({ instance }) {
 
             setTags(extractedData.tags);
             setImageTagsWithAltText(extractedData.imageTags);
-            setSelectedImageTagId((currentSelectedTagId) => {
-                if (extractedData.imageTags.some((tag) => tag.id === currentSelectedTagId)) {
-                    return currentSelectedTagId;
-                }
+            const nextSelectedTagId = extractedData.imageTags.some((tag) => tag.id === selectedImageTagId)
+                ? selectedImageTagId
+                : (extractedData.imageTags[0]?.id ?? '');
+            const nextSelectedTag = extractedData.imageTags.find((tag) => tag.id === nextSelectedTagId);
 
-                return extractedData.imageTags[0]?.id ?? '';
-            });
+            setSelectedImageTagId(nextSelectedTagId);
+            setEditableAltText(nextSelectedTag?.altText ?? '');
+            setAltTextSaveStatus('');
         } catch (error) {
             console.error('Failed to extract tags from PDF', error);
             setTags([]);
             setImageTagsWithAltText([]);
             setSelectedImageTagId('');
+            setEditableAltText('');
             setTagError('Failed to load tags from this PDF.');
         } finally {
             setIsLoadingTags(false);
         }
-    }, [documentViewer, instance, licenseKey]);
+    }, [documentViewer, instance, licenseKey, selectedImageTagId]);
 
     useEffect(() => {
         if (!documentViewer) {
@@ -460,6 +465,63 @@ function PageNavControls({ instance }) {
         };
     }, [clearImageHighlight, documentViewer, markProgrammaticScrollSettling]);
 
+    useEffect(() => {
+        if (!documentViewer) {
+            return undefined;
+        }
+
+        const onMouseLeftDown = () => {
+            if (programmaticScrollInProgressRef.current) {
+                return;
+            }
+
+            clearImageHighlight();
+        };
+
+        documentViewer.addEventListener('mouseLeftDown', onMouseLeftDown);
+
+        return () => {
+            documentViewer.removeEventListener('mouseLeftDown', onMouseLeftDown);
+        };
+    }, [clearImageHighlight, documentViewer]);
+
+    useEffect(() => {
+        const onGlobalClickCapture = (event) => {
+            const clickTarget = event.target;
+            if (!(clickTarget instanceof Element)) {
+                return;
+            }
+
+            const isExportActionClick = Boolean(
+                clickTarget.closest(
+                    '[data-element="downloadButton"],[data-element="saveAsButton"],[data-element="printButton"]'
+                )
+            );
+
+            if (isExportActionClick) {
+                clearImageHighlight();
+            }
+        };
+
+        const onGlobalKeyDownCapture = (event) => {
+            const key = event.key?.toLowerCase();
+            const isSaveHotkey = (event.ctrlKey || event.metaKey) && key === 's';
+            const isPrintHotkey = (event.ctrlKey || event.metaKey) && key === 'p';
+
+            if (isSaveHotkey || isPrintHotkey) {
+                clearImageHighlight();
+            }
+        };
+
+        window.addEventListener('click', onGlobalClickCapture, true);
+        window.addEventListener('keydown', onGlobalKeyDownCapture, true);
+
+        return () => {
+            window.removeEventListener('click', onGlobalClickCapture, true);
+            window.removeEventListener('keydown', onGlobalKeyDownCapture, true);
+        };
+    }, [clearImageHighlight]);
+
     useEffect(() => () => {
         programmaticScrollInProgressRef.current = false;
         clearImageHighlight();
@@ -469,12 +531,16 @@ function PageNavControls({ instance }) {
         }
     }, [clearImageHighlight]);
 
+    const selectedImageTag = imageTagsWithAltText.find((tag) => tag.id === selectedImageTagId) || null;
+
     const handleImageTagSelected = (event) => {
         const selectedId = event.target.value;
         setSelectedImageTagId(selectedId);
+        setAltTextSaveStatus('');
 
         const selectedTag = imageTagsWithAltText.find((tag) => tag.id === selectedId);
         if (selectedTag) {
+            setEditableAltText(selectedTag.altText ?? '');
             scrollToImageTag(selectedTag);
         }
     };
@@ -489,7 +555,92 @@ function PageNavControls({ instance }) {
         const nextTag = imageTagsWithAltText[nextIndex];
 
         setSelectedImageTagId(nextTag.id);
+        setEditableAltText(nextTag.altText ?? '');
+        setAltTextSaveStatus('');
         scrollToImageTag(nextTag);
+    };
+
+    const saveSelectedImageAltText = async () => {
+        if (!selectedImageTag || !instance?.Core || !documentViewer) {
+            return;
+        }
+
+        setIsSavingAltText(true);
+        setAltTextSaveStatus('');
+
+        try {
+            const doc = documentViewer.getDocument();
+            const pdfDoc = await doc.getPDFDoc();
+            const selectedStructObjNum = Number.parseInt(selectedImageTag.id.replace('struct-', ''), 10);
+            const nextAltText = editableAltText;
+
+            await instance.Core.PDFNet.runWithCleanup(async () => {
+                await pdfDoc.initSecurityHandler();
+                const structTree = await pdfDoc.getStructTree();
+
+                if (!(await structTree.isValid())) {
+                    throw new Error('Document has no structure tree');
+                }
+
+                const updateTagAltText = async (structElement) => {
+                    if (!(await structElement.isValid())) {
+                        return false;
+                    }
+
+                    const structSdfObj = await structElement.getSDFObj();
+                    const structObjNum = await structSdfObj.getObjNum();
+
+                    if (structObjNum === selectedStructObjNum) {
+                        if (nextAltText.trim()) {
+                            await structSdfObj.putText('Alt', nextAltText);
+                        } else {
+                            await structSdfObj.eraseFromKey('Alt');
+                        }
+
+                        return true;
+                    }
+
+                    const numKids = await structElement.getNumKids();
+                    for (let index = 0; index < numKids; index += 1) {
+                        const isContentItem = await structElement.isContentItem(index);
+                        if (isContentItem) {
+                            continue;
+                        }
+
+                        const childElement = await structElement.getAsStructElem(index);
+                        const updated = await updateTagAltText(childElement);
+
+                        if (updated) {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                };
+
+                let didUpdate = false;
+                const rootKidCount = await structTree.getNumKids();
+                for (let rootIndex = 0; rootIndex < rootKidCount; rootIndex += 1) {
+                    const rootElement = await structTree.getKid(rootIndex);
+                    didUpdate = await updateTagAltText(rootElement);
+                    if (didUpdate) {
+                        break;
+                    }
+                }
+
+                if (!didUpdate) {
+                    throw new Error('Unable to find selected image tag in structure tree');
+                }
+            }, licenseKey);
+
+            setAltTextSaveStatus('Alt-text saved to PDF.');
+            await loadTags();
+        } catch (error) {
+            console.error('Failed to update Alt-text in PDF', error);
+            setAltTextSaveStatus('Failed to save Alt-text.');
+        } finally {
+            setIsSavingAltText(false);
+        }
     };
 
     return (
@@ -525,17 +676,35 @@ function PageNavControls({ instance }) {
                 <div className="tag-tools">
                     <h3>Image tags with Alt-text</h3>
                     {imageTagsWithAltText.length > 0 ? (
-                        <div className="tag-tools-row">
-                            <select value={selectedImageTagId} onChange={handleImageTagSelected}>
-                                {imageTagsWithAltText.map((tag) => (
-                                    <option key={tag.id} value={tag.id}>
-                                        {`Page ${tag.pageNumber ?? '-'} - ${tag.altText}`}
-                                    </option>
-                                ))}
-                            </select>
-                            <button onClick={goToNextImageWithAltText}>
-                                Next Image with Alt-text
+                        <div className="tag-tools-stack">
+                            <div className="tag-tools-row">
+                                <select value={selectedImageTagId} onChange={handleImageTagSelected}>
+                                    {imageTagsWithAltText.map((tag) => (
+                                        <option key={tag.id} value={tag.id}>
+                                            {`Page ${tag.pageNumber ?? '-'} - ${tag.altText}`}
+                                        </option>
+                                    ))}
+                                </select>
+                                <button onClick={goToNextImageWithAltText}>
+                                    Next Image with Alt-text
+                                </button>
+                            </div>
+
+                            <label htmlFor="selected-image-alt-text">Alt-text</label>
+                            <textarea
+                                id="selected-image-alt-text"
+                                className="tag-alt-editor"
+                                value={editableAltText}
+                                onChange={(event) => setEditableAltText(event.target.value)}
+                                rows={3}
+                            />
+                            <button
+                                onClick={saveSelectedImageAltText}
+                                disabled={!selectedImageTag || isSavingAltText}
+                            >
+                                {isSavingAltText ? 'Saving Alt-text...' : 'Save Alt-text to PDF'}
                             </button>
+                            {altTextSaveStatus ? <p>{altTextSaveStatus}</p> : null}
                         </div>
                     ) : (
                         <p>No Figure tags with Alt-text were found.</p>

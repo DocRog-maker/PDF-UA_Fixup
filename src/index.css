@@ -120,6 +120,12 @@ select {
   gap: 6px;
 }
 
+.tag-tools-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .tag-tools-row {
   display: flex;
   flex-wrap: wrap;
@@ -134,6 +140,17 @@ select {
   background: var(--bg);
   color: var(--text-h);
   padding: 8px 10px;
+}
+
+.tag-alt-editor {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  padding: 8px 10px;
+  resize: vertical;
 }
 
 .tag-list-container {
