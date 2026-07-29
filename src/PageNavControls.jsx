@@ -226,31 +226,39 @@ console.log(`imageTagYY ${imageTag.rect.y1}`)
                 const findImageRectOnPage = async (page, targetStructObjNum, targetMCID) => {
                     const reader = await instance.Core.PDFNet.ElementReader.create();
                     await reader.beginOnPage(page);
+                    let matchedImageRect = null;
+                    let matchedVectorRect = null;
+
+                    const mergeRect = (existingRect, nextRect) => {
+                        if (!existingRect) {
+                            return { ...nextRect };
+                        }
+
+                        return {
+                            x1: Math.min(existingRect.x1, nextRect.x1),
+                            y1: Math.min(existingRect.y1, nextRect.y1),
+                            x2: Math.max(existingRect.x2, nextRect.x2),
+                            y2: Math.max(existingRect.y2, nextRect.y2),
+                        };
+                    };
 
                     const scanElements = async () => {
                         while (true) {
                             const element = await reader.next();
-                            if (!element) { return null; }
+                            if (!element) {
+                                return;
+                            }
 
                             const elementType = await element.getType();
 
                             if (elementType === elementTypes.e_null) {
-                                return null;
+                                return;
                             }
 
                             if (elementType === elementTypes.e_form) {
                                 await reader.formBegin();
-                                const nestedRect = await scanElements();
+                                await scanElements();
                                 await reader.end();
-
-                                if (nestedRect) {
-                                    return nestedRect;
-                                }
-
-                                continue;
-                            }
-
-                            if (elementType !== elementTypes.e_image && elementType !== elementTypes.e_inline_image) {
                                 continue;
                             }
 
@@ -270,364 +278,393 @@ console.log(`imageTagYY ${imageTag.rect.y1}`)
                                 continue;
                             }
 
-                            const imageRect = await element.getBBox();
-                            return {
-                                x1: imageRect.x1,
-                                y1: imageRect.y1,
-                                x2: imageRect.x2,
-                                y2: imageRect.y2,
-                            };
-                        }
-                    };
+                           const elementRect = await element.getBBox();
+                           const rect = {
+                               x1: elementRect.x1,
+                               y1: elementRect.y1,
+                               x2: elementRect.x2,
+                               y2: elementRect.y2,
+                           };
+                           const rectWidth = Math.abs(rect.x2 - rect.x1);
+                           const rectHeight = Math.abs(rect.y2 - rect.y1);
+                           const minRectSize = 0.01;
+                           if (rectWidth < minRectSize && rectHeight < minRectSize) {
+                               console.log('[FigureRectSkipSmall]', {
+                                   pageNumber: await page.getIndex(),
+                                   targetStructObjNum,
+                                   targetMCID,
+                                   elementType,
+                                   structMCID,
+                                   rect,
+                               });
+                               continue;
+                           }
 
-                    const imageRect = await scanElements();
-                    await reader.end();
+                           const isImageElement =
+                               elementType === elementTypes.e_image || elementType === elementTypes.e_inline_image;
+                           console.log('[FigureRectInclude]', {
+                               pageNumber: await page.getIndex(),
+                               targetStructObjNum,
+                               targetMCID,
+                               elementType,
+                               structMCID,
+                               includedAs: isImageElement ? 'image' : 'vector',
+                               rect,
+                           });
+                           if (isImageElement) {
+                               matchedImageRect = mergeRect(matchedImageRect, rect);
+                           } else {
+                               matchedVectorRect = mergeRect(matchedVectorRect, rect);
+                           }
+                       }
+                   };
 
-                    return imageRect;
-                };
+                   await scanElements();
+                   await reader.end();
 
-                const collectTags = async (structElement, depth) => {
-                    if (!(await structElement.isValid())) {
-                        return;
-                    }
+                   return matchedImageRect || matchedVectorRect;
+               };
 
-                    const structType = await structElement.getType();
-                    const hasAlt = await structElement.hasAlt();
-                    const altText = hasAlt ? await structElement.getAlt() : '';
-                    const hasTitle = await structElement.hasTitle();
-                    const title = hasTitle ? await structElement.getTitle() : '';
-                    const structSdfObj = await structElement.getSDFObj();
-                    const structObjNum = await structSdfObj.getObjNum();
-                    const tagId = `struct-${structObjNum}`;
+               const collectTags = async (structElement, depth) => {
+                   if (!(await structElement.isValid())) {
+                       return;
+                   }
 
-                    if (structType?.toLowerCase() === 'figure' || structType?.toLowerCase() === 'image') {
-                        const pageData = await findFirstPageForElement(structElement);
-                        const rect =
-                            pageData && pageData.pageNumber
-                                ? await findImageRectOnPage(pageData.page, structObjNum, pageData.mcid)
-                                : null;
+                   const structType = await structElement.getType();
+                   const hasAlt = await structElement.hasAlt();
+                   const altText = hasAlt ? await structElement.getAlt() : '';
+                   const hasTitle = await structElement.hasTitle();
+                   const title = hasTitle ? await structElement.getTitle() : '';
+                   const structSdfObj = await structElement.getSDFObj();
+                   const structObjNum = await structSdfObj.getObjNum();
+                   const tagId = `struct-${structObjNum}`;
 
-                        imageTags.push({
-                            id: tagId,
-                            depth,
-                            type: structType,
-                            title,
-                            altText,
-                            pageNumber: pageData?.pageNumber ?? null,
-                            rect,
-                        });
-                    }
+                   if (structType?.toLowerCase() === 'figure' || structType?.toLowerCase() === 'image') {
+                       const pageData = await findFirstPageForElement(structElement);
+                       const rect =
+                           pageData && pageData.pageNumber
+                               ? await findImageRectOnPage(pageData.page, structObjNum, pageData.mcid)
+                               : null;
 
-                    const numKids = await structElement.getNumKids();
-                    for (let childIndex = 0; childIndex < numKids; childIndex += 1) {
-                        const isContentItem = await structElement.isContentItem(childIndex);
-                        if (isContentItem) {
-                            continue;
-                        }
+                       imageTags.push({
+                           id: tagId,
+                           depth,
+                           type: structType,
+                           title,
+                           altText,
+                           pageNumber: pageData?.pageNumber ?? null,
+                           rect,
+                       });
+                   }
 
-                        const childElement = await structElement.getAsStructElem(childIndex);
-                        await collectTags(childElement, depth + 1);
-                    }
-                };
+                   const numKids = await structElement.getNumKids();
+                   for (let childIndex = 0; childIndex < numKids; childIndex += 1) {
+                       const isContentItem = await structElement.isContentItem(childIndex);
+                       if (isContentItem) {
+                           continue;
+                       }
 
-                const rootKidCount = await structTree.getNumKids();
-                for (let rootIndex = 0; rootIndex < rootKidCount; rootIndex += 1) {
-                    const rootElement = await structTree.getKid(rootIndex);
-                    console.log(rootElement)
-                    await collectTags(rootElement, 0);
-                }
+                       const childElement = await structElement.getAsStructElem(childIndex);
+                       await collectTags(childElement, depth + 1);
+                   }
+               };
 
-                return { imageTags };
-            }, licenseKey);
+               const rootKidCount = await structTree.getNumKids();
+               for (let rootIndex = 0; rootIndex < rootKidCount; rootIndex += 1) {
+                   const rootElement = await structTree.getKid(rootIndex);
+                   await collectTags(rootElement, 0);
+               }
 
-            setImageTagsWithAltText(extractedData.imageTags);
-            const nextSelectedTagId = extractedData.imageTags.some((tag) => tag.id === selectedImageTagId)
-                ? selectedImageTagId
-                : (extractedData.imageTags[0]?.id ?? '');
-            const nextSelectedTag = extractedData.imageTags.find((tag) => tag.id === nextSelectedTagId);
+               return { imageTags };
+           }, licenseKey);
 
-            setSelectedImageTagId(nextSelectedTagId);
-            setEditableAltText(nextSelectedTag?.altText ?? '');
-            setAltTextSaveStatus('');
-        } catch (error) {
-            console.error('Failed to extract tags from PDF', error);
-            setImageTagsWithAltText([]);
-            setSelectedImageTagId('');
-            setEditableAltText('');
-        } finally {
-            setIsLoadingTags(false);
-        }
-    }, [documentViewer, instance, licenseKey, selectedImageTagId]);
+           setImageTagsWithAltText(extractedData.imageTags);
+           const nextSelectedTagId = extractedData.imageTags.some((tag) => tag.id === selectedImageTagId)
+               ? selectedImageTagId
+               : (extractedData.imageTags[0]?.id ?? '');
+           const nextSelectedTag = extractedData.imageTags.find((tag) => tag.id === nextSelectedTagId);
 
-    useEffect(() => {
-        if (!documentViewer) {
-            return undefined;
-        }
+           setSelectedImageTagId(nextSelectedTagId);
+           setEditableAltText(nextSelectedTag?.altText ?? '');
+           setAltTextSaveStatus('');
+       } catch (error) {
+           console.error('Failed to extract tags from PDF', error);
+           setImageTagsWithAltText([]);
+           setSelectedImageTagId('');
+           setEditableAltText('');
+       } finally {
+           setIsLoadingTags(false);
+       }
+   }, [documentViewer, instance, licenseKey, selectedImageTagId]);
 
-        const onDocumentLoaded = async () => {
-            clearImageHighlight();
-            await loadTags();
+   useEffect(() => {
+       if (!documentViewer) {
+           return undefined;
+       }
+
+       const onDocumentLoaded = async () => {
+           clearImageHighlight();
+           await loadTags();
         };
 
-        documentViewer.addEventListener('documentLoaded', onDocumentLoaded);
+       documentViewer.addEventListener('documentLoaded', onDocumentLoaded);
 
-        return () => {
-            documentViewer.removeEventListener('documentLoaded', onDocumentLoaded);
+       return () => {
+           documentViewer.removeEventListener('documentLoaded', onDocumentLoaded);
 
-        };
-    }, [clearImageHighlight, documentViewer, loadTags]);
+       };
+   }, [clearImageHighlight, documentViewer, loadTags]);
 
-    useEffect(() => {
-        if (!documentViewer) {
-            return undefined;
-        }
+   useEffect(() => {
+       if (!documentViewer) {
+           return undefined;
+       }
 
-        const onMouseLeftDown = () => {
-            clearImageHighlight();
-        };
+       const onMouseLeftDown = () => {
+           clearImageHighlight();
+       };
 
-        documentViewer.addEventListener('mouseLeftDown', onMouseLeftDown);
+       documentViewer.addEventListener('mouseLeftDown', onMouseLeftDown);
 
-        return () => {
-            documentViewer.removeEventListener('mouseLeftDown', onMouseLeftDown);
-        };
-    }, [clearImageHighlight, documentViewer]);
+       return () => {
+           documentViewer.removeEventListener('mouseLeftDown', onMouseLeftDown);
+       };
+   }, [clearImageHighlight, documentViewer]);
 
-    useEffect(() => {
-        const exportActionSelector = [
-            '[data-element*="download" i]',
-            '[data-element*="save" i]',
-            '[data-element*="print" i]',
-            '[aria-label*="download" i]',
-            '[aria-label*="save" i]',
-            '[aria-label*="print" i]',
-        ].join(',');
+   useEffect(() => {
+       const exportActionSelector = [
+           '[data-element*="download" i]',
+           '[data-element*="save" i]',
+           '[data-element*="print" i]',
+           '[aria-label*="download" i]',
+           '[aria-label*="save" i]',
+           '[aria-label*="print" i]',
+       ].join(',');
 
-        const clearHighlightIfExportAction = (eventTarget) => {
-            if (!(eventTarget instanceof Element)) {
-                return;
-            }
+       const clearHighlightIfExportAction = (eventTarget) => {
+           if (!(eventTarget instanceof Element)) {
+               return;
+           }
 
-            const isExportActionClick = Boolean(eventTarget.closest(exportActionSelector));
-            if (isExportActionClick) {
-                clearImageHighlight();
-            }
-        };
+           const isExportActionClick = Boolean(eventTarget.closest(exportActionSelector));
+           if (isExportActionClick) {
+               clearImageHighlight();
+           }
+       };
 
-        const onGlobalPointerDownCapture = (event) => {
-            clearHighlightIfExportAction(event.target);
-        };
+       const onGlobalPointerDownCapture = (event) => {
+           clearHighlightIfExportAction(event.target);
+       };
 
-        const onGlobalClickCapture = (event) => {
-            clearHighlightIfExportAction(event.target);
-        };
+       const onGlobalClickCapture = (event) => {
+           clearHighlightIfExportAction(event.target);
+       };
 
-        const onGlobalKeyDownCapture = (event) => {
-            const key = event.key?.toLowerCase();
-            const isSaveHotkey = (event.ctrlKey || event.metaKey) && key === 's';
-            const isPrintHotkey = (event.ctrlKey || event.metaKey) && key === 'p';
+       const onGlobalKeyDownCapture = (event) => {
+           const key = event.key?.toLowerCase();
+           const isSaveHotkey = (event.ctrlKey || event.metaKey) && key === 's';
+           const isPrintHotkey = (event.ctrlKey || event.metaKey) && key === 'p';
 
-            if (isSaveHotkey || isPrintHotkey) {
-                clearImageHighlight();
-            }
-        };
+           if (isSaveHotkey || isPrintHotkey) {
+               clearImageHighlight();
+           }
+       };
 
-        window.addEventListener('pointerdown', onGlobalPointerDownCapture, true);
-        window.addEventListener('click', onGlobalClickCapture, true);
-        window.addEventListener('keydown', onGlobalKeyDownCapture, true);
+       window.addEventListener('pointerdown', onGlobalPointerDownCapture, true);
+       window.addEventListener('click', onGlobalClickCapture, true);
+       window.addEventListener('keydown', onGlobalKeyDownCapture, true);
 
-        return () => {
-            window.removeEventListener('pointerdown', onGlobalPointerDownCapture, true);
-            window.removeEventListener('click', onGlobalClickCapture, true);
-            window.removeEventListener('keydown', onGlobalKeyDownCapture, true);
-        };
-    }, [clearImageHighlight]);
+       return () => {
+           window.removeEventListener('pointerdown', onGlobalPointerDownCapture, true);
+           window.removeEventListener('click', onGlobalClickCapture, true);
+           window.removeEventListener('keydown', onGlobalKeyDownCapture, true);
+       };
+   }, [clearImageHighlight]);
 
-    useEffect(() => () => {
-        clearImageHighlight();
-    }, [clearImageHighlight]);
+   useEffect(() => () => {
+       clearImageHighlight();
+   }, [clearImageHighlight]);
 
-    const selectedImageTag = imageTagsWithAltText.find((tag) => tag.id === selectedImageTagId) || null;
+   const selectedImageTag = imageTagsWithAltText.find((tag) => tag.id === selectedImageTagId) || null;
 
-    const handleImageTagSelected = (event) => {
-        const selectedId = event.target.value;
-        setSelectedImageTagId(selectedId);
-        setAltTextSaveStatus('');
+   const handleImageTagSelected = (event) => {
+       const selectedId = event.target.value;
+       setSelectedImageTagId(selectedId);
+       setAltTextSaveStatus('');
 
-        const selectedTag = imageTagsWithAltText.find((tag) => tag.id === selectedId);
-        if (selectedTag) {
-            setEditableAltText(selectedTag.altText ?? '');
-            scrollToImageTag(selectedTag);
-        }
-    };
+       const selectedTag = imageTagsWithAltText.find((tag) => tag.id === selectedId);
+       if (selectedTag) {
+           setEditableAltText(selectedTag.altText ?? '');
+           scrollToImageTag(selectedTag);
+       }
+   };
 
-    const goToNextImageWithAltText = () => {
-        if (!imageTagsWithAltText.length) {
-            return;
-        }
+   const goToNextImageWithAltText = () => {
+       if (!imageTagsWithAltText.length) {
+           return;
+       }
 
-        const currentIndex = imageTagsWithAltText.findIndex((tag) => tag.id === selectedImageTagId);
-        const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % imageTagsWithAltText.length : 0;
-        const nextTag = imageTagsWithAltText[nextIndex];
-console.log(`tag id ${nextTag.id}`)
-        setSelectedImageTagId(nextTag.id);
-        setEditableAltText(nextTag.altText ?? '');
-        setAltTextSaveStatus('');
-        console.log('BBB')
-        scrollToImageTag(nextTag, { alignTop: false });
-    };
+       const currentIndex = imageTagsWithAltText.findIndex((tag) => tag.id === selectedImageTagId);
+       const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % imageTagsWithAltText.length : 0;
+       const nextTag = imageTagsWithAltText[nextIndex];
 
-    const saveSelectedImageAltText = async () => {
-        if (!selectedImageTag || !instance?.Core || !documentViewer) {
-            return;
-        }
+       setSelectedImageTagId(nextTag.id);
+       setEditableAltText(nextTag.altText ?? '');
+       setAltTextSaveStatus('');
+       scrollToImageTag(nextTag, { alignTop: true });
+   };
 
-        setIsSavingAltText(true);
-        setAltTextSaveStatus('');
+   const saveSelectedImageAltText = async () => {
+       if (!selectedImageTag || !instance?.Core || !documentViewer) {
+           return;
+       }
 
-        try {
-            const doc = documentViewer.getDocument();
-            const pdfDoc = await doc.getPDFDoc();
-            const selectedStructObjNum = Number.parseInt(selectedImageTag.id.replace('struct-', ''), 10);
-            const nextAltText = editableAltText;
+       setIsSavingAltText(true);
+       setAltTextSaveStatus('');
 
-            await instance.Core.PDFNet.runWithCleanup(async () => {
-                await pdfDoc.initSecurityHandler();
-                const structTree = await pdfDoc.getStructTree();
+       try {
+           const doc = documentViewer.getDocument();
+           const pdfDoc = await doc.getPDFDoc();
+           const selectedStructObjNum = Number.parseInt(selectedImageTag.id.replace('struct-', ''), 10);
+           const nextAltText = editableAltText;
 
-                if (!(await structTree.isValid())) {
-                    throw new Error('Document has no structure tree');
-                }
+           await instance.Core.PDFNet.runWithCleanup(async () => {
+               await pdfDoc.initSecurityHandler();
+               const structTree = await pdfDoc.getStructTree();
 
-                const updateTagAltText = async (structElement) => {
-                    if (!(await structElement.isValid())) {
-                        return false;
-                    }
+               if (!(await structTree.isValid())) {
+                   throw new Error('Document has no structure tree');
+               }
 
-                    const structSdfObj = await structElement.getSDFObj();
-                    const structObjNum = await structSdfObj.getObjNum();
+               const updateTagAltText = async (structElement) => {
+                   if (!(await structElement.isValid())) {
+                       return false;
+                   }
 
-                    if (structObjNum === selectedStructObjNum) {
-                        if (nextAltText.trim()) {
-                            await structSdfObj.putText('Alt', nextAltText);
-                        } else {
-                            await structSdfObj.eraseFromKey('Alt');
-                        }
+                   const structSdfObj = await structElement.getSDFObj();
+                   const structObjNum = await structSdfObj.getObjNum();
 
-                        return true;
-                    }
+                   if (structObjNum === selectedStructObjNum) {
+                       if (nextAltText.trim()) {
+                           await structSdfObj.putText('Alt', nextAltText);
+                       } else {
+                           await structSdfObj.eraseFromKey('Alt');
+                       }
 
-                    const numKids = await structElement.getNumKids();
-                    for (let index = 0; index < numKids; index += 1) {
-                        const isContentItem = await structElement.isContentItem(index);
-                        if (isContentItem) {
-                            continue;
-                        }
+                       return true;
+                   }
 
-                        const childElement = await structElement.getAsStructElem(index);
-                        const updated = await updateTagAltText(childElement);
+                   const numKids = await structElement.getNumKids();
+                   for (let index = 0; index < numKids; index += 1) {
+                       const isContentItem = await structElement.isContentItem(index);
+                       if (isContentItem) {
+                           continue;
+                       }
 
-                        if (updated) {
-                            return true;
-                        }
-                    }
+                       const childElement = await structElement.getAsStructElem(index);
+                       const updated = await updateTagAltText(childElement);
 
-                    return false;
-                };
+                       if (updated) {
+                           return true;
+                       }
+                   }
 
-                let didUpdate = false;
-                const rootKidCount = await structTree.getNumKids();
-                for (let rootIndex = 0; rootIndex < rootKidCount; rootIndex += 1) {
-                    const rootElement = await structTree.getKid(rootIndex);
-                    didUpdate = await updateTagAltText(rootElement);
-                    if (didUpdate) {
-                        break;
-                    }
-                }
+                   return false;
+               };
 
-                if (!didUpdate) {
-                    throw new Error('Unable to find selected image tag in structure tree');
-                }
-            }, licenseKey);
+               let didUpdate = false;
+               const rootKidCount = await structTree.getNumKids();
+               for (let rootIndex = 0; rootIndex < rootKidCount; rootIndex += 1) {
+                   const rootElement = await structTree.getKid(rootIndex);
+                   didUpdate = await updateTagAltText(rootElement);
+                   if (didUpdate) {
+                       break;
+                   }
+               }
 
-            setAltTextSaveStatus('Alt-text saved to PDF.');
-            await loadTags();
-        } catch (error) {
-            console.error('Failed to update Alt-text in PDF', error);
-            setAltTextSaveStatus('Failed to save Alt-text.');
-        } finally {
-            setIsSavingAltText(false);
-        }
-    };
+               if (!didUpdate) {
+                   throw new Error('Unable to find selected image tag in structure tree');
+               }
+           }, licenseKey);
 
-    return (
-        <aside className="contract-review-nav">
-            <div className="contract-review-controls">
-                <button
-                    onClick={openFilePicker}
-                    onDrop={handleFileDrop}
-                    onDragOver={handleDragOver}
-                    disabled={!isReady}
-                >
-                    Open File
+           setAltTextSaveStatus('Alt-text saved to PDF.');
+           await loadTags();
+       } catch (error) {
+           console.error('Failed to update Alt-text in PDF', error);
+           setAltTextSaveStatus('Failed to save Alt-text.');
+       } finally {
+           setIsSavingAltText(false);
+       }
+   };
+
+   return (
+       <aside className="contract-review-nav">
+           <div className="contract-review-controls">
+               <button
+                   onClick={openFilePicker}
+                   onDrop={handleFileDrop}
+                   onDragOver={handleDragOver}
+                   disabled={!isReady}
+               >
+                   Open File
+               </button>
+               <button onClick={loadTags} disabled={!isReady || isLoadingTags}>
+                   {isLoadingTags ? 'Loading Tags...' : 'Refresh Tags'}
                 </button>
-                <button onClick={loadTags} disabled={!isReady || isLoadingTags}>
-                    {isLoadingTags ? 'Loading Tags...' : 'Refresh Tags'}
-                </button>
-                <button
-                    onClick={downloadCurrentFile}
-                    disabled={!isReady || !instance?.UI?.downloadPdf || isDownloadingFile}
-                >
-                    {isDownloadingFile ? 'Saving...' : 'Save File'}
-                </button>
+               <button
+                   onClick={downloadCurrentFile}
+                   disabled={!isReady || !instance?.UI?.downloadPdf || isDownloadingFile}
+               >
+                   {isDownloadingFile ? 'Saving...' : 'Save File'}
+               </button>
 
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    onChange={handleFileSelected}
-                    style={{ display: 'none' }}
-                />
-            </div>
+               <input
+                   ref={fileInputRef}
+                   type="file"
+                   onChange={handleFileSelected}
+                   style={{ display: 'none' }}
+               />
+           </div>
 
-            <div className="tag-tools">
-                <h3>Image tags</h3>
-                {imageTagsWithAltText.length > 0 ? (
-                    <div className="tag-tools-stack">
-                        <div className="tag-tools-row">
-                            <select value={selectedImageTagId} onChange={handleImageTagSelected}>
-                                {imageTagsWithAltText.map((tag) => (
-                                    <option key={tag.id} value={tag.id}>
-                                        {`Page ${tag.pageNumber ?? '-'} - ${tag.altText || '(No Alt-text)'}`}
-                                    </option>
-                                ))}
-                            </select>
-                            <button onClick={goToNextImageWithAltText}>
-                                Next Image Tag
-                            </button>
-                        </div>
+           <div className="tag-tools">
+               <h3>Image tags</h3>
+               {imageTagsWithAltText.length > 0 ? (
+                   <div className="tag-tools-stack">
+                       <div className="tag-tools-row">
+                           <select value={selectedImageTagId} onChange={handleImageTagSelected}>
+                               {imageTagsWithAltText.map((tag) => (
+                                   <option key={tag.id} value={tag.id}>
+                                       {`Page ${tag.pageNumber ?? '-'} - ${tag.altText || '(No Alt-text)'}`}
+                                   </option>
+                               ))}
+                           </select>
+                           <button onClick={goToNextImageWithAltText}>
+                               Next Image Tag
+                           </button>
+                       </div>
 
-                        <label htmlFor="selected-image-alt-text">Alt-text</label>
-                        <textarea
-                            id="selected-image-alt-text"
-                            className="tag-alt-editor"
-                            value={editableAltText}
-                            onChange={(event) => setEditableAltText(event.target.value)}
-                            rows={3}
-                        />
-                        <button
-                            onClick={saveSelectedImageAltText}
-                            disabled={!selectedImageTag || isSavingAltText}
-                        >
-                            {isSavingAltText ? 'Saving Alt-text...' : 'Save Alt-text to PDF'}
-                        </button>
-                        {altTextSaveStatus ? <p>{altTextSaveStatus}</p> : null}
-                    </div>
-                ) : (
-                    <p>No image tags were found.</p>
-                )}
-            </div>
-        </aside>
-    );
+                       <label htmlFor="selected-image-alt-text">Alt-text</label>
+                       <textarea
+                           id="selected-image-alt-text"
+                           className="tag-alt-editor"
+                           value={editableAltText}
+                           onChange={(event) => setEditableAltText(event.target.value)}
+                           rows={3}
+                       />
+                       <button
+                           onClick={saveSelectedImageAltText}
+                           disabled={!selectedImageTag || isSavingAltText}
+                       >
+                           {isSavingAltText ? 'Saving Alt-text...' : 'Save Alt-text to PDF'}
+                       </button>
+                       {altTextSaveStatus ? <p>{altTextSaveStatus}</p> : null}
+                   </div>
+               ) : (
+                   <p>No image tags were found.</p>
+               )}
+           </div>
+       </aside>
+   );
 
 }
 
