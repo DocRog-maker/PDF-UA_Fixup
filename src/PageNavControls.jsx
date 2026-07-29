@@ -15,7 +15,6 @@ function PageNavControls({ instance }) {
     const [imageTagsWithAltText, setImageTagsWithAltText] = useState([]);
     const [selectedImageTagId, setSelectedImageTagId] = useState('');
     const [editableAltText, setEditableAltText] = useState('');
-    const [manualScrollInput, setManualScrollInput] = useState('');
     const [isDownloadingFile, setIsDownloadingFile] = useState(false);
     const [isSavingAltText, setIsSavingAltText] = useState(false);
     const [altTextSaveStatus, setAltTextSaveStatus] = useState('');
@@ -874,37 +873,6 @@ return;
         scrollToImageTag(nextTag, { alignTop: true });
     };
 
-    const scrollToManualPosition = () => {
-        if (!documentViewer) {
-            return;
-        }
-
-        const targetTop = Number.parseFloat(manualScrollInput);
-        if (!Number.isFinite(targetTop) || targetTop < 0) {
-            logDebug('manualScroll:invalidInput', { manualScrollInput });
-            return;
-        }
-
-        const scrollViewElement = documentViewer.getScrollViewElement();
-        if (!scrollViewElement || typeof scrollViewElement.scrollTo !== 'function') {
-            logDebug('manualScroll:abort-no-scroll-element');
-            return;
-        }
-
-        clearTopAlignLock();
-        beginProgrammaticScroll(1200);
-        logDebug('manualScroll:scrollTo', {
-            input: manualScrollInput,
-            targetTop,
-            previousTop: scrollViewElement.scrollTop,
-        });
-
-        scrollViewElement.scrollTo({
-            top: targetTop,
-            behavior: 'auto',
-        });
-    };
-
     const saveSelectedImageAltText = async () => {
         if (!selectedImageTag || !instance?.Core || !documentViewer) {
             return;
@@ -989,105 +957,72 @@ return;
     };
 
     return (
-        <>
-            <aside className="contract-review-nav">
-                <div className="contract-review-controls">
-                    <button
-                        onClick={openFilePicker}
-                        onDrop={handleFileDrop}
-                        onDragOver={handleDragOver}
-                        disabled={!isReady}
-                    >
-                        Open File
-                    </button>
-                    <button onClick={loadTags} disabled={!isReady || isLoadingTags}>
-                        {isLoadingTags ? 'Loading Tags...' : 'Refresh Tags'}
-                    </button>
-                    <button
-                        onClick={downloadCurrentFile}
-                        disabled={!isReady || !instance?.UI?.downloadPdf || isDownloadingFile}
-                    >
-                        {isDownloadingFile ? 'Saving...' : 'Save File'}
-                    </button>
+        <aside className="contract-review-nav">
+            <div className="contract-review-controls">
+                <button
+                    onClick={openFilePicker}
+                    onDrop={handleFileDrop}
+                    onDragOver={handleDragOver}
+                    disabled={!isReady}
+                >
+                    Open File
+                </button>
+                <button onClick={loadTags} disabled={!isReady || isLoadingTags}>
+                    {isLoadingTags ? 'Loading Tags...' : 'Refresh Tags'}
+                </button>
+                <button
+                    onClick={downloadCurrentFile}
+                    disabled={!isReady || !instance?.UI?.downloadPdf || isDownloadingFile}
+                >
+                    {isDownloadingFile ? 'Saving...' : 'Save File'}
+                </button>
 
-                    <input
-                        ref={fileInputRef}
-                        type="file"
-                        onChange={handleFileSelected}
-                        style={{ display: 'none' }}
-                    />
-                </div>
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    onChange={handleFileSelected}
+                    style={{ display: 'none' }}
+                />
+            </div>
 
-                <div className="manual-scroll-row">
-                    <input
-                        type="text"
-                        value={manualScrollInput}
-                        onChange={(event) => setManualScrollInput(event.target.value)}
-                        placeholder="Scroll top (px)"
-                    />
-                    <button onClick={scrollToManualPosition} disabled={!isReady}>
-                        Scroll To Position
-                    </button>
-                </div>
-
-                <div className="tag-tools">
-                    <h3>Image tags</h3>
-                    {imageTagsWithAltText.length > 0 ? (
-                        <div className="tag-tools-stack">
-                            <div className="tag-tools-row">
-                                <select value={selectedImageTagId} onChange={handleImageTagSelected}>
-                                    {imageTagsWithAltText.map((tag) => (
-                                        <option key={tag.id} value={tag.id}>
-                                            {`Page ${tag.pageNumber ?? '-'} - ${tag.altText || '(No Alt-text)'}`}
-                                        </option>
-                                    ))}
-                                </select>
-                                <button onClick={goToNextImageWithAltText}>
-                                    Next Image Tag
-                                </button>
-                            </div>
-
-                            <label htmlFor="selected-image-alt-text">Alt-text</label>
-                            <textarea
-                                id="selected-image-alt-text"
-                                className="tag-alt-editor"
-                                value={editableAltText}
-                                onChange={(event) => setEditableAltText(event.target.value)}
-                                rows={3}
-                            />
-                            <button
-                                onClick={saveSelectedImageAltText}
-                                disabled={!selectedImageTag || isSavingAltText}
-                            >
-                                {isSavingAltText ? 'Saving Alt-text...' : 'Save Alt-text to PDF'}
+            <div className="tag-tools">
+                <h3>Image tags</h3>
+                {imageTagsWithAltText.length > 0 ? (
+                    <div className="tag-tools-stack">
+                        <div className="tag-tools-row">
+                            <select value={selectedImageTagId} onChange={handleImageTagSelected}>
+                                {imageTagsWithAltText.map((tag) => (
+                                    <option key={tag.id} value={tag.id}>
+                                        {`Page ${tag.pageNumber ?? '-'} - ${tag.altText || '(No Alt-text)'}`}
+                                    </option>
+                                ))}
+                            </select>
+                            <button onClick={goToNextImageWithAltText}>
+                                Next Image Tag
                             </button>
-                            {altTextSaveStatus ? <p>{altTextSaveStatus}</p> : null}
                         </div>
-                    ) : (
-                        <p>No image tags were found.</p>
-                    )}
-                </div>
-            </aside>
 
-            <div className="tag-list-container">
-                <h3>Document tags ({tags.length})</h3>
-                {tagError && <p>{tagError}</p>}
-                {!tagError && tags.length === 0 && !isLoadingTags && (
-                    <p>No tags found in this document.</p>
-                )}
-                {tags.length > 0 && (
-                    <ul className="tag-list">
-                        {tags.map((tag) => (
-                            <li key={tag.id} style={{ paddingLeft: `${tag.depth * 14}px` }}>
-                                <span>{tag.type}</span>
-                                {tag.title ? <span>{` | Title: ${tag.title}`}</span> : null}
-                                {tag.altText ? <span>{` | Alt: ${tag.altText}`}</span> : null}
-                            </li>
-                        ))}
-                    </ul>
+                        <label htmlFor="selected-image-alt-text">Alt-text</label>
+                        <textarea
+                            id="selected-image-alt-text"
+                            className="tag-alt-editor"
+                            value={editableAltText}
+                            onChange={(event) => setEditableAltText(event.target.value)}
+                            rows={3}
+                        />
+                        <button
+                            onClick={saveSelectedImageAltText}
+                            disabled={!selectedImageTag || isSavingAltText}
+                        >
+                            {isSavingAltText ? 'Saving Alt-text...' : 'Save Alt-text to PDF'}
+                        </button>
+                        {altTextSaveStatus ? <p>{altTextSaveStatus}</p> : null}
+                    </div>
+                ) : (
+                    <p>No image tags were found.</p>
                 )}
             </div>
-        </>
+        </aside>
     );
 
 }

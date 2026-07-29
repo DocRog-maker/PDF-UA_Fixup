@@ -102,21 +102,6 @@ select {
   gap: 8px;
 }
 
-.manual-scroll-row {
-  display: flex;
-  gap: 8px;
-}
-
-.manual-scroll-row input {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text-h);
-  padding: 8px 10px;
-}
-
 .contract-review-controls button,
 .tag-tools button {
   border: 1px solid var(--border);
