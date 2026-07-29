@@ -16,6 +16,7 @@ function PageNavControls({ instance }) {
     const [selectedImageTagId, setSelectedImageTagId] = useState('');
     const [editableAltText, setEditableAltText] = useState('');
     const [manualScrollInput, setManualScrollInput] = useState('');
+    const [isDownloadingFile, setIsDownloadingFile] = useState(false);
     const [isSavingAltText, setIsSavingAltText] = useState(false);
     const [altTextSaveStatus, setAltTextSaveStatus] = useState('');
     const [isLoadingTags, setIsLoadingTags] = useState(false);
@@ -80,6 +81,22 @@ function PageNavControls({ instance }) {
 
     const handleDragOver = (event) => {
         event.preventDefault();
+    };
+
+    const downloadCurrentFile = async () => {
+        if (!instance?.UI?.downloadPdf || isDownloadingFile) {
+            return;
+        }
+
+        setIsDownloadingFile(true);
+        clearImageHighlight();
+        try {
+            await instance.UI.downloadPdf();
+        } catch (error) {
+            console.error('Failed to download PDF from WebViewer', error);
+        } finally {
+            setIsDownloadingFile(false);
+        }
     };
 
     const clearImageHighlight = useCallback(() => {
@@ -670,43 +687,43 @@ return;
         };
     }, [clearImageHighlight, documentViewer, loadTags]);
 
-    useEffect(() => {
-        if (!documentViewer) {
-            return undefined;
-        }
+    // useEffect(() => {
+    //     if (!documentViewer) {
+    //         return undefined;
+    //     }
 
-        const scrollViewElement = documentViewer.getScrollViewElement();
-        if (!scrollViewElement || typeof scrollViewElement.addEventListener !== 'function') {
-            return undefined;
-        }
+    //     const scrollViewElement = documentViewer.getScrollViewElement();
+    //     if (!scrollViewElement || typeof scrollViewElement.addEventListener !== 'function') {
+    //         return undefined;
+    //     }
 
-        const onScroll = () => {
-            const scrollViewElement = documentViewer.getScrollViewElement();
-            logDebug('scrollView:onScroll', {
-                programmaticInProgress: programmaticScrollInProgressRef.current,
-                scrollTop: scrollViewElement?.scrollTop,
-                scrollLeft: scrollViewElement?.scrollLeft,
-                hasTopAlignLock: Boolean(topAlignLockRef.current),
-            });
+    //     const onScroll = () => {
+    //         const scrollViewElement = documentViewer.getScrollViewElement();
+    //         logDebug('scrollView:onScroll', {
+    //             programmaticInProgress: programmaticScrollInProgressRef.current,
+    //             scrollTop: scrollViewElement?.scrollTop,
+    //             scrollLeft: scrollViewElement?.scrollLeft,
+    //             hasTopAlignLock: Boolean(topAlignLockRef.current),
+    //         });
 
-            if (enforceTopAlignLock('scroll')) {
-                return;
-            }
+    //         if (enforceTopAlignLock('scroll')) {
+    //             return;
+    //         }
 
-            if (programmaticScrollInProgressRef.current) {
-                markProgrammaticScrollSettling();
-                return;
-            }
+    //         if (programmaticScrollInProgressRef.current) {
+    //             markProgrammaticScrollSettling();
+    //             return;
+    //         }
 
-          //  clearImageHighlight();
-        };
+    //       //  clearImageHighlight();
+    //     };
 
-        scrollViewElement.addEventListener('scroll', onScroll, { passive: true });
+    //     scrollViewElement.addEventListener('scroll', onScroll, { passive: true });
 
-        return () => {
-            scrollViewElement.removeEventListener('scroll', onScroll);
-        };
-    }, [clearImageHighlight, documentViewer, enforceTopAlignLock, markProgrammaticScrollSettling, logDebug]);
+    //     return () => {
+    //         scrollViewElement.removeEventListener('scroll', onScroll);
+    //     };
+    // }, [clearImageHighlight, documentViewer, enforceTopAlignLock, markProgrammaticScrollSettling, logDebug]);
 
     useEffect(() => {
         if (!documentViewer) {
@@ -764,21 +781,32 @@ return;
     }, [clearImageHighlight, documentViewer, logDebug]);
 
     useEffect(() => {
-        const onGlobalClickCapture = (event) => {
-            const clickTarget = event.target;
-            if (!(clickTarget instanceof Element)) {
+        const exportActionSelector = [
+            '[data-element*="download" i]',
+            '[data-element*="save" i]',
+            '[data-element*="print" i]',
+            '[aria-label*="download" i]',
+            '[aria-label*="save" i]',
+            '[aria-label*="print" i]',
+        ].join(',');
+
+        const clearHighlightIfExportAction = (eventTarget) => {
+            if (!(eventTarget instanceof Element)) {
                 return;
             }
 
-            const isExportActionClick = Boolean(
-                clickTarget.closest(
-                    '[data-element="downloadButton"],[data-element="saveAsButton"],[data-element="printButton"]'
-                )
-            );
-
+            const isExportActionClick = Boolean(eventTarget.closest(exportActionSelector));
             if (isExportActionClick) {
                 clearImageHighlight();
             }
+        };
+
+        const onGlobalPointerDownCapture = (event) => {
+            clearHighlightIfExportAction(event.target);
+        };
+
+        const onGlobalClickCapture = (event) => {
+            clearHighlightIfExportAction(event.target);
         };
 
         const onGlobalKeyDownCapture = (event) => {
@@ -791,10 +819,12 @@ return;
             }
         };
 
+        window.addEventListener('pointerdown', onGlobalPointerDownCapture, true);
         window.addEventListener('click', onGlobalClickCapture, true);
         window.addEventListener('keydown', onGlobalKeyDownCapture, true);
 
         return () => {
+            window.removeEventListener('pointerdown', onGlobalPointerDownCapture, true);
             window.removeEventListener('click', onGlobalClickCapture, true);
             window.removeEventListener('keydown', onGlobalKeyDownCapture, true);
         };
@@ -972,6 +1002,12 @@ return;
                     </button>
                     <button onClick={loadTags} disabled={!isReady || isLoadingTags}>
                         {isLoadingTags ? 'Loading Tags...' : 'Refresh Tags'}
+                    </button>
+                    <button
+                        onClick={downloadCurrentFile}
+                        disabled={!isReady || !instance?.UI?.downloadPdf || isDownloadingFile}
+                    >
+                        {isDownloadingFile ? 'Saving...' : 'Save File'}
                     </button>
 
                     <input
