@@ -5,12 +5,6 @@ function PageNavControls({ instance }) {
     const isReady = Boolean(documentViewer);
     const fileInputRef = useRef(null);
     const activeHighlightAnnotationRef = useRef(null);
-    const programmaticScrollInProgressRef = useRef(false);
-    const programmaticScrollTimeoutRef = useRef(null);
-    const topAlignLockRef = useRef(null);
-    const topAlignLockTimeoutRef = useRef(null);
-    const topAlignLockIntervalRef = useRef(null);
-    const [tags, setTags] = useState([]);
     const [imageTagsWithAltText, setImageTagsWithAltText] = useState([]);
     const [selectedImageTagId, setSelectedImageTagId] = useState('');
     const [editableAltText, setEditableAltText] = useState('');
@@ -18,7 +12,6 @@ function PageNavControls({ instance }) {
     const [isSavingAltText, setIsSavingAltText] = useState(false);
     const [altTextSaveStatus, setAltTextSaveStatus] = useState('');
     const [isLoadingTags, setIsLoadingTags] = useState(false);
-    const [tagError, setTagError] = useState('');
     const licenseKey = import.meta.env.APRYSE_LICENSE_KEY || '';
     const enableImageHighlight = true;
 
@@ -94,148 +87,6 @@ function PageNavControls({ instance }) {
         activeHighlightAnnotationRef.current = null;
     }, [instance]);
 
-    const clearTopAlignLock = useCallback(() => {
-        topAlignLockRef.current = null;
-        if (topAlignLockTimeoutRef.current) {
-            window.clearTimeout(topAlignLockTimeoutRef.current);
-            topAlignLockTimeoutRef.current = null;
-        }
-        if (topAlignLockIntervalRef.current) {
-            window.clearInterval(topAlignLockIntervalRef.current);
-            topAlignLockIntervalRef.current = null;
-        }
-    }, []);
-
-    const getTopAlignedPdfY = useCallback((imageTag) => {
-        if (!documentViewer || !imageTag?.rect || !imageTag?.pageNumber) {
-            return null;
-        }
-
-        const pageHeight = documentViewer.getPageHeight(imageTag.pageNumber);
-        const maxY = Math.max(imageTag.rect.y1, imageTag.rect.y2);
-        return pageHeight - maxY;
-    }, [documentViewer]);
-
-    const setTopAlignLock = useCallback((imageTag, durationMs = 5000) => {
-        if (!imageTag?.rect || !imageTag?.pageNumber) {
-            return;
-        }
-
-        const topAlignedPdfY = getTopAlignedPdfY(imageTag);
-        if (topAlignedPdfY === null) {
-            return;
-        }
-
-        topAlignLockRef.current = {
-            pageNumber: imageTag.pageNumber,
-            rect: {
-                x1: imageTag.rect.x1,
-                y1: imageTag.rect.y1,
-                x2: imageTag.rect.x2,
-                y2: imageTag.rect.y2,
-            },
-            id: imageTag.id,
-            topAlignedPdfY,
-        };
-        if (topAlignLockTimeoutRef.current) {
-            window.clearTimeout(topAlignLockTimeoutRef.current);
-        }
-        if (topAlignLockIntervalRef.current) {
-            window.clearInterval(topAlignLockIntervalRef.current);
-        }
-
-        const runLockCorrection = () => {
-            if (!documentViewer || !topAlignLockRef.current) {
-                return;
-            }
-
-            const scrollViewElement = documentViewer.getScrollViewElement();
-            const displayMode = documentViewer.getDisplayModeManager().getDisplayMode();
-            if (!scrollViewElement || !displayMode) {
-                return;
-            }
-
-            const lock = topAlignLockRef.current;
-            const lockTargetPoint = displayMode.pageToWindow(
-                {
-                    x: (lock.rect.x1 + lock.rect.x2) / 2,
-                    y: lock.topAlignedPdfY,
-                },
-                lock.pageNumber
-            );
-            const maxTop = Math.max(0, scrollViewElement.scrollHeight - scrollViewElement.clientHeight);
-            const desiredTop = Math.min(maxTop, Math.max(0, lockTargetPoint.y - 24));
-            const verticalDelta = Math.abs(scrollViewElement.scrollTop - desiredTop);
-
-            if (verticalDelta > 2) {
-                scrollViewElement.scrollTo({
-                    top: desiredTop,
-                    behavior: 'auto',
-                });
-            }
-        };
-
-        topAlignLockIntervalRef.current = window.setInterval(runLockCorrection, 90);
-        topAlignLockTimeoutRef.current = window.setTimeout(() => {
-            if (topAlignLockIntervalRef.current) {
-                window.clearInterval(topAlignLockIntervalRef.current);
-                topAlignLockIntervalRef.current = null;
-            }
-            topAlignLockRef.current = null;
-            topAlignLockTimeoutRef.current = null;
-        }, durationMs);
-    }, [documentViewer, getTopAlignedPdfY]);
-
-    const scheduleProgrammaticScrollReset = useCallback((delayMs) => {
-        if (programmaticScrollTimeoutRef.current) {
-            window.clearTimeout(programmaticScrollTimeoutRef.current);
-        }
-
-        programmaticScrollTimeoutRef.current = window.setTimeout(() => {
-            programmaticScrollInProgressRef.current = false;
-            programmaticScrollTimeoutRef.current = null;
-        }, delayMs);
-    }, []);
-
-    const beginProgrammaticScroll = useCallback((maxDurationMs = 2500) => {
-        programmaticScrollInProgressRef.current = true;
-        scheduleProgrammaticScrollReset(maxDurationMs);
-    }, [scheduleProgrammaticScrollReset]);
-
-    const enforceTopAlignLock = useCallback((source) => {
-        if (!documentViewer || !topAlignLockRef.current) {
-            return false;
-        }
-
-        const scrollViewElement = documentViewer.getScrollViewElement();
-        const displayMode = documentViewer.getDisplayModeManager().getDisplayMode();
-        if (!scrollViewElement || !displayMode) {
-            return true;
-        }
-
-        const lock = topAlignLockRef.current;
-        const lockTargetPoint = displayMode.pageToWindow(
-            {
-                x: (lock.rect.x1 + lock.rect.x2) / 2,
-                y: lock.topAlignedPdfY,
-            },
-            lock.pageNumber
-        );
-        const maxTop = Math.max(0, scrollViewElement.scrollHeight - scrollViewElement.clientHeight);
-        const desiredTop = Math.min(maxTop, Math.max(0, lockTargetPoint.y - 24));
-        const verticalDelta = Math.abs(scrollViewElement.scrollTop - desiredTop);
-
-        if (verticalDelta > 2) {
-            beginProgrammaticScroll(1200);
-            scrollViewElement.scrollTo({
-                top: desiredTop,
-                behavior: 'auto',
-            });
-        }
-
-        return true;
-    }, [beginProgrammaticScroll, documentViewer]);
-
     const showImageHighlight = useCallback((imageTag) => {
         clearImageHighlight();
 
@@ -285,7 +136,7 @@ function PageNavControls({ instance }) {
         instance.Core.annotationManager.jumpToAnnotation(highlightAnnotation);
     }, [clearImageHighlight, documentViewer, enableImageHighlight, instance]);
 
-    const scrollToImageTag = useCallback(async(imageTag, options = {}) => {
+    const scrollToImageTag = useCallback((imageTag, options = {}) => {
         const { alignTop = false } = options;
 
         if (!documentViewer || !imageTag?.pageNumber) {
@@ -294,59 +145,10 @@ function PageNavControls({ instance }) {
 
         showImageHighlight(imageTag);
         documentViewer.setCurrentPage(imageTag.pageNumber, !alignTop);
-
-        if (!imageTag.rect) {
-            return;
-        }
-return;
-        const pageHieght = await documentViewer.getPageHeight(imageTag.pageNumber)
-        const targetTop = pageHieght - Math.max(imageTag.rect.y1, imageTag.rect.y2);
-        const zoom = documentViewer.getZoomLevel();
-        const finalTop = targetTop*zoom
-        // if (alignTop) {
-             const scrollViewElement = documentViewer.getScrollViewElement();
-             scrollViewElement.scrollTo({
-            top: finalTop,
-            behavior: 'auto',
-        });
-        //     const displayMode = documentViewer.getDisplayModeManager().getDisplayMode();
-        //     if (scrollViewElement && displayMode) {
-        //         const topAlignedPdfY = getTopAlignedPdfY(imageTag);
-        //         if (topAlignedPdfY !== null) {
-        //             const targetPoint = displayMode.pageToWindow(
-        //                 {
-        //                     x: (imageTag.rect.x1 + imageTag.rect.x2) / 2,
-        //                     y: topAlignedPdfY,
-        //                 },
-        //                 imageTag.pageNumber
-        //             );
-        //             const maxTop = Math.max(0, scrollViewElement.scrollHeight - scrollViewElement.clientHeight);
-        //             const desiredTop = Math.min(maxTop, Math.max(0, targetPoint.y - 24));
-        //             beginProgrammaticScroll(2500);
-        //             // debug logging removed
-        //                 left: scrollViewElement.scrollLeft,
-        //                 top: desiredTop,
-        //                 rawPoint: targetPoint,
-        //                 topAlignedPdfY,
-        //                 expectedPdfRect,
-        //                 expectedPdfAnchor,
-        //             });
-        //             scrollViewElement.scrollTo({
-        //                 top: desiredTop,
-        //                 behavior: 'auto',
-        //             });
-        //         }
-        //     }
-        //     setTopAlignLock(imageTag);
-        // } else {
-        //     clearTopAlignLock();
-        // }
-
-    }, [beginProgrammaticScroll, clearTopAlignLock, documentViewer, getTopAlignedPdfY, setTopAlignLock, showImageHighlight]);
+    }, [documentViewer, showImageHighlight]);
 
     const loadTags = useCallback(async () => {
         if (!instance?.Core || !documentViewer) {
-            setTags([]);
             setImageTagsWithAltText([]);
             setSelectedImageTagId('');
             setEditableAltText('');
@@ -355,7 +157,6 @@ return;
         }
 
         setIsLoadingTags(true);
-        setTagError('');
 
         try {
             const doc = documentViewer.getDocument();
@@ -369,7 +170,6 @@ return;
                     return { tags: [], imageTags: [] };
                 }
 
-                const allTags = [];
                 const imageTags = [];
                 const elementTypes = instance.Core.PDFNet.Element.Type;
                 const contentItemTypes = instance.Core.PDFNet.ContentItem.Type;
@@ -489,14 +289,6 @@ return;
                     const structObjNum = await structSdfObj.getObjNum();
                     const tagId = `struct-${structObjNum}`;
 
-                    allTags.push({
-                        id: tagId,
-                        depth,
-                        type: structType,
-                        title,
-                        altText,
-                    });
-
                     if (structType?.toLowerCase() === 'figure' || structType?.toLowerCase() === 'image') {
                         const pageData = await findFirstPageForElement(structElement);
                         const rect =
@@ -533,10 +325,9 @@ return;
                     await collectTags(rootElement, 0);
                 }
 
-                return { tags: allTags, imageTags };
+                return { imageTags };
             }, licenseKey);
 
-            setTags(extractedData.tags);
             setImageTagsWithAltText(extractedData.imageTags);
             const nextSelectedTagId = extractedData.imageTags.some((tag) => tag.id === selectedImageTagId)
                 ? selectedImageTagId
@@ -548,11 +339,9 @@ return;
             setAltTextSaveStatus('');
         } catch (error) {
             console.error('Failed to extract tags from PDF', error);
-            setTags([]);
             setImageTagsWithAltText([]);
             setSelectedImageTagId('');
             setEditableAltText('');
-            setTagError('Failed to load tags from this PDF.');
         } finally {
             setIsLoadingTags(false);
         }
@@ -581,43 +370,7 @@ return;
             return undefined;
         }
 
-        const onFinishedRendering = () => {
-            enforceTopAlignLock('finishedRendering');
-        };
-        const onPagesUpdated = () => {
-            enforceTopAlignLock('pagesUpdated');
-        };
-        const onPageComplete = (pageNum) => {
-            if (!topAlignLockRef.current) {
-                return;
-            }
-
-            if (pageNum === topAlignLockRef.current.pageNumber) {
-                enforceTopAlignLock('pageComplete');
-            }
-        };
-
-        documentViewer.addEventListener('finishedRendering', onFinishedRendering);
-        documentViewer.addEventListener('pagesUpdated', onPagesUpdated);
-        documentViewer.addEventListener('pageComplete', onPageComplete);
-
-        return () => {
-            documentViewer.removeEventListener('finishedRendering', onFinishedRendering);
-            documentViewer.removeEventListener('pagesUpdated', onPagesUpdated);
-            documentViewer.removeEventListener('pageComplete', onPageComplete);
-        };
-    }, [documentViewer, enforceTopAlignLock]);
-
-    useEffect(() => {
-        if (!documentViewer) {
-            return undefined;
-        }
-
         const onMouseLeftDown = () => {
-            if (programmaticScrollInProgressRef.current) {
-                return;
-            }
-
             clearImageHighlight();
         };
 
@@ -679,18 +432,8 @@ return;
     }, [clearImageHighlight]);
 
     useEffect(() => () => {
-        programmaticScrollInProgressRef.current = false;
         clearImageHighlight();
-        clearTopAlignLock();
-        if (programmaticScrollTimeoutRef.current) {
-            window.clearTimeout(programmaticScrollTimeoutRef.current);
-            programmaticScrollTimeoutRef.current = null;
-        }
-        if (topAlignLockIntervalRef.current) {
-            window.clearInterval(topAlignLockIntervalRef.current);
-            topAlignLockIntervalRef.current = null;
-        }
-    }, [clearImageHighlight, clearTopAlignLock]);
+    }, [clearImageHighlight]);
 
     const selectedImageTag = imageTagsWithAltText.find((tag) => tag.id === selectedImageTagId) || null;
 

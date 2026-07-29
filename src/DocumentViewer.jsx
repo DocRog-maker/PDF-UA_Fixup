@@ -19,6 +19,13 @@ function DocumentViewer({ contractDocumentUrl, onWebViewerInitialized }) {
       instance.UI.disableElements([
         'downloadButton',
         'saveAsButton',
+        'toolbarGroup-Annotate',
+        'toolbarGroup-Shapes',
+        'toolbarGroup-Insert',
+        'toolbarGroup-Edit',
+        'toolbarGroup-FillAndSign',
+        'toolbarGroup-Forms',
+        'toolbarGroup-View',
       ]);
       onWebViewerInitialized?.(instance);
     });
