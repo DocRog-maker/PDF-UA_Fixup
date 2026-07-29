@@ -16,6 +16,10 @@ function DocumentViewer({ contractDocumentUrl, onWebViewerInitialized }) {
       },
       viewerContainerRef.current
     ).then((instance) => {
+      instance.UI.disableElements([
+        'downloadButton',
+        'saveAsButton',
+      ]);
       onWebViewerInitialized?.(instance);
     });
   }, [contractDocumentUrl, licenseKey, onWebViewerInitialized]);
