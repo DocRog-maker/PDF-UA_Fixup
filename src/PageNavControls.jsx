@@ -23,7 +23,7 @@ function PageNavControls({ instance }) {
     const licenseKey = import.meta.env.APRYSE_LICENSE_KEY || '';
     const debugScroll = true;
     const debugVerbosity = 'verbose';
-    const enableImageHighlight = false;
+    const enableImageHighlight = true;
 
     const logDebug = useCallback((eventName, details = {}) => {
         if (!debugScroll) {
@@ -336,9 +336,11 @@ function PageNavControls({ instance }) {
             tagId: imageTag?.id,
             pageNumber: imageTag?.pageNumber,
         });
+        instance.Core.annotationManager.jumpToAnnotation(highlightAnnotation);
     }, [clearImageHighlight, documentViewer, enableImageHighlight, instance, logDebug]);
 
     const scrollToImageTag = useCallback(async(imageTag, options = {}) => {
+        //return;
         const { alignTop = false } = options;
         const expectedPdfRect = imageTag?.rect
             ? {
@@ -373,7 +375,8 @@ function PageNavControls({ instance }) {
             logDebug('scrollToImageTag:abort-no-documentViewer-or-page');
             return;
         }
-        beginProgrammaticScroll();
+        console.log('AAA')
+      //  beginProgrammaticScroll();
         showImageHighlight(imageTag);
         documentViewer.setCurrentPage(imageTag.pageNumber, !alignTop);
         logDebug('scrollToImageTag:setCurrentPage', {
@@ -387,7 +390,7 @@ function PageNavControls({ instance }) {
             });
             return;
         }
-
+return;
         const pageHieght = await documentViewer.getPageHeight(imageTag.pageNumber)
         console.log(`ph: ${pageHieght}`)
         const targetTop = pageHieght - Math.max(imageTag.rect.y1, imageTag.rect.y2);
@@ -695,7 +698,7 @@ function PageNavControls({ instance }) {
                 return;
             }
 
-            clearImageHighlight();
+          //  clearImageHighlight();
         };
 
         scrollViewElement.addEventListener('scroll', onScroll, { passive: true });
