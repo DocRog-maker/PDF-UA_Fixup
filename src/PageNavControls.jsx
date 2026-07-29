@@ -98,8 +98,10 @@ function PageNavControls({ instance }) {
             return;
         }
 
+        console.log(`Rect ${imageTag?.rect.y1} ${imageTag?.rect.y2}`)
         const { annotationManager, Annotations, Math: CoreMath } = instance.Core;
         const pageHeight = documentViewer.getPageHeight(imageTag.pageNumber);
+        const pageWidth = documentViewer.getPageWidth(imageTag.pageNumber);
         const minX = Math.min(imageTag.rect.x1, imageTag.rect.x2);
         const maxX = Math.max(imageTag.rect.x1, imageTag.rect.x2);
         const minY = Math.min(imageTag.rect.y1, imageTag.rect.y2);
@@ -107,6 +109,14 @@ function PageNavControls({ instance }) {
         const padding = 6;
         const top = pageHeight - maxY;
         const bottom = pageHeight - minY;
+        const leftClamped = Math.max(0, minX - padding);
+        const rightClamped = Math.min(pageWidth, maxX + padding);
+        const topClamped = Math.max(0, top - padding);
+        const bottomClamped = Math.min(pageHeight, bottom + padding);
+        const rectLeft = Math.min(leftClamped, rightClamped);
+        const rectRight = Math.max(leftClamped, rightClamped);
+        const rectTop = Math.min(topClamped, bottomClamped);
+        const rectBottom = Math.max(topClamped, bottomClamped);
 
         const highlightAnnotation = new Annotations.RectangleAnnotation({
             PageNumber: imageTag.pageNumber,
@@ -121,10 +131,10 @@ function PageNavControls({ instance }) {
         highlightAnnotation.Locked = true;
         highlightAnnotation.setRect(
             new CoreMath.Rect(
-                minX - padding,
-                top - padding,
-                maxX + padding,
-                bottom + padding
+                rectLeft,
+                rectTop,
+                rectRight,
+                rectBottom
             )
         );
 
@@ -142,7 +152,8 @@ function PageNavControls({ instance }) {
         if (!documentViewer || !imageTag?.pageNumber) {
             return;
         }
-
+        console.log(imageTag.rect)
+console.log(`imageTagYY ${imageTag.rect.y1}`)
         showImageHighlight(imageTag);
         documentViewer.setCurrentPage(imageTag.pageNumber, !alignTop);
     }, [documentViewer, showImageHighlight]);
@@ -322,6 +333,7 @@ function PageNavControls({ instance }) {
                 const rootKidCount = await structTree.getNumKids();
                 for (let rootIndex = 0; rootIndex < rootKidCount; rootIndex += 1) {
                     const rootElement = await structTree.getKid(rootIndex);
+                    console.log(rootElement)
                     await collectTags(rootElement, 0);
                 }
 
@@ -457,11 +469,12 @@ function PageNavControls({ instance }) {
         const currentIndex = imageTagsWithAltText.findIndex((tag) => tag.id === selectedImageTagId);
         const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % imageTagsWithAltText.length : 0;
         const nextTag = imageTagsWithAltText[nextIndex];
-
+console.log(`tag id ${nextTag.id}`)
         setSelectedImageTagId(nextTag.id);
         setEditableAltText(nextTag.altText ?? '');
         setAltTextSaveStatus('');
-        scrollToImageTag(nextTag, { alignTop: true });
+        console.log('BBB')
+        scrollToImageTag(nextTag, { alignTop: false });
     };
 
     const saveSelectedImageAltText = async () => {

@@ -73,7 +73,7 @@ select {
 
 .contract-review-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) 420px;
   gap: 12px;
   padding: 12px;
   border-top: 1px solid var(--border);
@@ -98,8 +98,12 @@ select {
 
 .contract-review-controls {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
+}
+
+.contract-review-controls button {
+  white-space: nowrap;
 }
 
 .contract-review-controls button,
