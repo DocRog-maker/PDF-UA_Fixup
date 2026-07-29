@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import WebViewer from '@pdftron/webviewer';
 
-function DocumentViewer({ contractDocumentUrl, onWebViewerInitialized }) {
+function DocumentViewer({ onWebViewerInitialized }) {
   const viewerContainerRef = useRef(null);
   const licenseKey = import.meta.env.APRYSE_LICENSE_KEY;
 
@@ -10,7 +10,6 @@ function DocumentViewer({ contractDocumentUrl, onWebViewerInitialized }) {
       {
         path: 'lib/webviewer',
         licenseKey,
-        initialDoc: contractDocumentUrl,
         enableFilePicker: true,
         fullAPI: true,
       },
@@ -29,7 +28,7 @@ function DocumentViewer({ contractDocumentUrl, onWebViewerInitialized }) {
       ]);
       onWebViewerInitialized?.(instance);
     });
-  }, [contractDocumentUrl, licenseKey, onWebViewerInitialized]);
+  }, [licenseKey, onWebViewerInitialized]);
 
   return <div ref={viewerContainerRef} style={{ height: '80vh' }} />;
 }

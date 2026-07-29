@@ -98,7 +98,6 @@ function PageNavControls({ instance }) {
             return;
         }
 
-        console.log(`Rect ${imageTag?.rect.y1} ${imageTag?.rect.y2}`)
         const { annotationManager, Annotations, Math: CoreMath } = instance.Core;
         const pageHeight = documentViewer.getPageHeight(imageTag.pageNumber);
         const pageWidth = documentViewer.getPageWidth(imageTag.pageNumber);
@@ -152,8 +151,6 @@ function PageNavControls({ instance }) {
         if (!documentViewer || !imageTag?.pageNumber) {
             return;
         }
-        console.log(imageTag.rect)
-console.log(`imageTagYY ${imageTag.rect.y1}`)
         showImageHighlight(imageTag);
         documentViewer.setCurrentPage(imageTag.pageNumber, !alignTop);
     }, [documentViewer, showImageHighlight]);
@@ -289,28 +286,11 @@ console.log(`imageTagYY ${imageTag.rect.y1}`)
                            const rectHeight = Math.abs(rect.y2 - rect.y1);
                            const minRectSize = 0.01;
                            if (rectWidth < minRectSize && rectHeight < minRectSize) {
-                               console.log('[FigureRectSkipSmall]', {
-                                   pageNumber: await page.getIndex(),
-                                   targetStructObjNum,
-                                   targetMCID,
-                                   elementType,
-                                   structMCID,
-                                   rect,
-                               });
                                continue;
                            }
 
                            const isImageElement =
                                elementType === elementTypes.e_image || elementType === elementTypes.e_inline_image;
-                           console.log('[FigureRectInclude]', {
-                               pageNumber: await page.getIndex(),
-                               targetStructObjNum,
-                               targetMCID,
-                               elementType,
-                               structMCID,
-                               includedAs: isImageElement ? 'image' : 'vector',
-                               rect,
-                           });
                            if (isImageElement) {
                                matchedImageRect = mergeRect(matchedImageRect, rect);
                            } else {
