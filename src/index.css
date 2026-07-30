@@ -200,6 +200,59 @@ select {
   border-top: none;
 }
 
+.pdf-title-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 45%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.pdf-title-dialog {
+  width: min(520px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-h);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pdf-title-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  padding: 8px 10px;
+}
+
+.pdf-title-dialog-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.pdf-title-dialog-actions button {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.pdf-title-dialog-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 h1,
 h2 {
   font-family: var(--heading);

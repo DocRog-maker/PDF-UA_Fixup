@@ -11,6 +11,11 @@ function PageNavControls({ instance }) {
     const [isDownloadingFile, setIsDownloadingFile] = useState(false);
     const [isSavingAltText, setIsSavingAltText] = useState(false);
     const [altTextSaveStatus, setAltTextSaveStatus] = useState('');
+    const [detectedPdfTitle, setDetectedPdfTitle] = useState('');
+    const [editablePdfTitle, setEditablePdfTitle] = useState('');
+    const [isPdfTitleDialogOpen, setIsPdfTitleDialogOpen] = useState(false);
+    const [isSavingPdfTitle, setIsSavingPdfTitle] = useState(false);
+    const [pdfTitleSaveStatus, setPdfTitleSaveStatus] = useState('');
     const [isLoadingTags, setIsLoadingTags] = useState(false);
     const licenseKey = import.meta.env.APRYSE_LICENSE_KEY || '';
     const enableImageHighlight = true;
@@ -377,6 +382,94 @@ function PageNavControls({ instance }) {
        }
    }, [documentViewer, instance, licenseKey, selectedImageTagId]);
 
+   const readPdfTitleMetadata = useCallback(async () => {
+       if (!instance?.Core || !documentViewer) {
+           return '';
+       }
+
+       const doc = documentViewer.getDocument();
+       const pdfDoc = await doc.getPDFDoc();
+
+       return instance.Core.PDFNet.runWithCleanup(async () => {
+           await pdfDoc.initSecurityHandler();
+           const trailer = await pdfDoc.getTrailer();
+           const info = await trailer.findObj('Info');
+           if (!info || typeof info.findObj !== 'function') {
+               return '';
+           }
+
+           const titleObj = await info.findObj('Title');
+           if (!titleObj) {
+               return '';
+           }
+
+           if (typeof titleObj.getAsPDFText === 'function') {
+               return (await titleObj.getAsPDFText()) || '';
+           }
+
+           if (typeof titleObj.getAsText === 'function') {
+               return (await titleObj.getAsText()) || '';
+           }
+
+           return '';
+       }, licenseKey);
+   }, [documentViewer, instance, licenseKey]);
+
+   const savePdfTitleMetadata = useCallback(async (nextTitle) => {
+       if (!instance?.Core || !documentViewer) {
+           return false;
+       }
+
+       setIsSavingPdfTitle(true);
+       setPdfTitleSaveStatus('');
+
+       try {
+           const normalizedTitle = nextTitle.trim();
+           const doc = documentViewer.getDocument();
+           const pdfDoc = await doc.getPDFDoc();
+
+           await instance.Core.PDFNet.runWithCleanup(async () => {
+               await pdfDoc.initSecurityHandler();
+               const trailer = await pdfDoc.getTrailer();
+               let info = await trailer.findObj('Info');
+
+               if (!info || typeof info.putText !== 'function' || typeof info.eraseFromKey !== 'function') {
+                   info = await trailer.putDict('Info');
+               }
+
+               if (normalizedTitle) {
+                   await info.putText('Title', normalizedTitle);
+               } else {
+                   await info.eraseFromKey('Title');
+               }
+           }, licenseKey);
+
+           setPdfTitleSaveStatus('PDF title metadata updated.');
+           return true;
+       } catch (error) {
+           console.error('Failed to update PDF title metadata', error);
+           setPdfTitleSaveStatus('Failed to update PDF title metadata.');
+           return false;
+       } finally {
+           setIsSavingPdfTitle(false);
+       }
+   }, [documentViewer, instance, licenseKey]);
+
+   const handleAcceptDetectedPdfTitle = async () => {
+       const didSave = await savePdfTitleMetadata(detectedPdfTitle);
+       if (didSave) {
+           setIsPdfTitleDialogOpen(false);
+       }
+   };
+
+   const handleSaveCustomPdfTitle = async () => {
+       const didSave = await savePdfTitleMetadata(editablePdfTitle);
+       if (didSave) {
+           setDetectedPdfTitle(editablePdfTitle.trim());
+           setIsPdfTitleDialogOpen(false);
+       }
+   };
+
    useEffect(() => {
        if (!documentViewer) {
            return undefined;
@@ -385,7 +478,20 @@ function PageNavControls({ instance }) {
        const onDocumentLoaded = async () => {
            clearImageHighlight();
            await loadTags();
-        };
+           try {
+               const currentTitle = await readPdfTitleMetadata();
+               setDetectedPdfTitle(currentTitle);
+               setEditablePdfTitle(currentTitle);
+               setPdfTitleSaveStatus('');
+               setIsPdfTitleDialogOpen(true);
+           } catch (error) {
+               console.error('Failed to read PDF title metadata', error);
+               setDetectedPdfTitle('');
+               setEditablePdfTitle('');
+               setPdfTitleSaveStatus('Failed to read PDF title metadata.');
+               setIsPdfTitleDialogOpen(true);
+           }
+       };
 
        documentViewer.addEventListener('documentLoaded', onDocumentLoaded);
 
@@ -393,7 +499,7 @@ function PageNavControls({ instance }) {
            documentViewer.removeEventListener('documentLoaded', onDocumentLoaded);
 
        };
-   }, [clearImageHighlight, documentViewer, loadTags]);
+   }, [clearImageHighlight, documentViewer, loadTags, readPdfTitleMetadata]);
 
    useEffect(() => {
        if (!documentViewer) {
@@ -578,72 +684,110 @@ function PageNavControls({ instance }) {
    };
 
    return (
-       <aside className="contract-review-nav">
-           <div className="contract-review-controls">
-               <button
-                   onClick={openFilePicker}
-                   onDrop={handleFileDrop}
-                   onDragOver={handleDragOver}
-                   disabled={!isReady}
-               >
-                   Open File
-               </button>
-               <button onClick={loadTags} disabled={!isReady || isLoadingTags}>
-                   {isLoadingTags ? 'Loading Tags...' : 'Refresh Tags'}
-                </button>
-               <button
-                   onClick={downloadCurrentFile}
-                   disabled={!isReady || !instance?.UI?.downloadPdf || isDownloadingFile}
-               >
-                   {isDownloadingFile ? 'Saving...' : 'Save File'}
-               </button>
+       <>
+           <aside className="contract-review-nav">
+               <div className="contract-review-controls">
+                   <button
+                       onClick={openFilePicker}
+                       onDrop={handleFileDrop}
+                       onDragOver={handleDragOver}
+                       disabled={!isReady}
+                   >
+                       Open File
+                   </button>
+                   <button onClick={loadTags} disabled={!isReady || isLoadingTags}>
+                       {isLoadingTags ? 'Loading Tags...' : 'Refresh Tags'}
+                   </button>
+                   <button
+                       onClick={downloadCurrentFile}
+                       disabled={!isReady || !instance?.UI?.downloadPdf || isDownloadingFile}
+                   >
+                       {isDownloadingFile ? 'Saving...' : 'Save File'}
+                   </button>
 
-               <input
-                   ref={fileInputRef}
-                   type="file"
-                   onChange={handleFileSelected}
-                   style={{ display: 'none' }}
-               />
-           </div>
+                   <input
+                       ref={fileInputRef}
+                       type="file"
+                       onChange={handleFileSelected}
+                       style={{ display: 'none' }}
+                   />
+               </div>
 
-           <div className="tag-tools">
-               <h3>Image tags</h3>
-               {imageTagsWithAltText.length > 0 ? (
-                   <div className="tag-tools-stack">
-                       <div className="tag-tools-row">
-                           <select value={selectedImageTagId} onChange={handleImageTagSelected}>
-                               {imageTagsWithAltText.map((tag) => (
-                                   <option key={tag.id} value={tag.id}>
-                                       {`Page ${tag.pageNumber ?? '-'} - ${tag.altText || '(No Alt-text)'}`}
-                                   </option>
-                               ))}
-                           </select>
-                           <button onClick={goToNextImageWithAltText}>
-                               Next Image Tag
+               <div className="tag-tools">
+                   <h3>Image tags</h3>
+                   {imageTagsWithAltText.length > 0 ? (
+                       <div className="tag-tools-stack">
+                           <div className="tag-tools-row">
+                               <select value={selectedImageTagId} onChange={handleImageTagSelected}>
+                                   {imageTagsWithAltText.map((tag) => (
+                                       <option key={tag.id} value={tag.id}>
+                                           {`Page ${tag.pageNumber ?? '-'} - ${tag.altText || '(No Alt-text)'}`}
+                                       </option>
+                                   ))}
+                               </select>
+                               <button onClick={goToNextImageWithAltText}>
+                                   Next Image Tag
+                               </button>
+                           </div>
+
+                           <label htmlFor="selected-image-alt-text">Alt-text</label>
+                           <textarea
+                               id="selected-image-alt-text"
+                               className="tag-alt-editor"
+                               value={editableAltText}
+                               onChange={(event) => setEditableAltText(event.target.value)}
+                               rows={3}
+                           />
+                           <button
+                               onClick={saveSelectedImageAltText}
+                               disabled={!selectedImageTag || isSavingAltText}
+                           >
+                               {isSavingAltText ? 'Saving Alt-text...' : 'Save Alt-text to PDF'}
+                           </button>
+                           {altTextSaveStatus ? <p>{altTextSaveStatus}</p> : null}
+                       </div>
+                   ) : (
+                       <p>No image tags were found.</p>
+                   )}
+               </div>
+           </aside>
+           {isPdfTitleDialogOpen ? (
+               <div className="pdf-title-dialog-backdrop" role="presentation">
+                   <div className="pdf-title-dialog" role="dialog" aria-modal="true" aria-labelledby="pdf-title-dialog-heading">
+                       <h3 id="pdf-title-dialog-heading">PDF Title Metadata</h3>
+                       <p>
+                           Current title:
+                           {' '}
+                           <strong>{detectedPdfTitle || '(No title set)'}</strong>
+                       </p>
+                       <label htmlFor="pdf-title-input">Title to save</label>
+                       <input
+                           id="pdf-title-input"
+                           className="pdf-title-input"
+                           type="text"
+                           value={editablePdfTitle}
+                           onChange={(event) => setEditablePdfTitle(event.target.value)}
+                           disabled={isSavingPdfTitle}
+                       />
+                       <div className="pdf-title-dialog-actions">
+                           <button
+                               onClick={handleAcceptDetectedPdfTitle}
+                               disabled={isSavingPdfTitle}
+                           >
+                               {isSavingPdfTitle ? 'Saving...' : 'Accept Current Title'}
+                           </button>
+                           <button
+                               onClick={handleSaveCustomPdfTitle}
+                               disabled={isSavingPdfTitle}
+                           >
+                               {isSavingPdfTitle ? 'Saving...' : 'Save Custom Title'}
                            </button>
                        </div>
-
-                       <label htmlFor="selected-image-alt-text">Alt-text</label>
-                       <textarea
-                           id="selected-image-alt-text"
-                           className="tag-alt-editor"
-                           value={editableAltText}
-                           onChange={(event) => setEditableAltText(event.target.value)}
-                           rows={3}
-                       />
-                       <button
-                           onClick={saveSelectedImageAltText}
-                           disabled={!selectedImageTag || isSavingAltText}
-                       >
-                           {isSavingAltText ? 'Saving Alt-text...' : 'Save Alt-text to PDF'}
-                       </button>
-                       {altTextSaveStatus ? <p>{altTextSaveStatus}</p> : null}
+                       {pdfTitleSaveStatus ? <p>{pdfTitleSaveStatus}</p> : null}
                    </div>
-               ) : (
-                   <p>No image tags were found.</p>
-               )}
-           </div>
-       </aside>
+               </div>
+           ) : null}
+       </>
    );
 
 }
